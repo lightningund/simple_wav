@@ -246,6 +246,12 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	Ok(MinWav{ data_buffer, sample_type, sample_rate, channels })
 }
 
+fn write_chunks(writer: &mut Box<dyn Write>) -> ioResult<()>{
+	writer.write_all(&RIFF_ID)?;
+
+	todo!();
+}
+
 use conversion::ConvertTo;
 
 /// Trait to mark a type as one of the available for being read/written in wav files
@@ -260,8 +266,7 @@ impl AudioSample for i32 { const WAV_TYPE: SampleType = SampleType::I32; }
 impl AudioSample for f32 { const WAV_TYPE: SampleType = SampleType::F32; }
 impl AudioSample for f64 { const WAV_TYPE: SampleType = SampleType::F64; }
 
-/// Converts a raw byte vec into a vector of samples of the target type
-/// Using the passed generic as an intermediate
+/// Converts a raw byte vec into a vector of samples of the target type, averaging together all the channels
 fn convert_buffer<T: AudioSample, const N: usize>(buf: &Vec<u8>, channels: usize) -> Vec<T>
 where
 	[u8; N]: ConvertTo<T>, // Make sure we have the right N to convert to the type
@@ -331,26 +336,26 @@ where
 	Ok((samples, rate))
 }
 
-// pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) {
-// 	let wav_header = header::WavHeader::new_header(
-// 		rate as i32,
-// 		1,
-// 		samples.len(),
-// 		S::WAV_TYPE
-// 	);
+pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) {
+	let wav_header = header::WavHeader::new_header(
+		rate as i32,
+		1,
+		samples.len(),
+		S::WAV_TYPE
+	);
 
-// 	let f = File::create(&path).unwrap();
-// 	let mut buf_writer: BufWriter<File> = BufWriter::new(f);
+	let f = File::create(&path).unwrap();
+	let mut buf_writer: Box<dyn Write> = Box::new(BufWriter::new(f));
 
-// 	// TODO: Base/CB/Extended Option
-// 	let header_bytes = wav_header.as_extended_bytes();
-// 	// let header_bytes = wav_header.as_base_bytes();
-// 	buf_writer.write_all(&header_bytes).unwrap();
+	// TODO: Base/CB/Extended Option
+	let header_bytes = wav_header.as_extended_bytes();
+	// let header_bytes = wav_header.as_base_bytes();
+	buf_writer.write_all(&header_bytes).unwrap();
 
-// 	let sample_bytes = cast_slice::<S, u8>(&samples[..]);
-// 	let data_size_bytes = sample_bytes.len() as u32;
-// 	buf_writer.write_all(&chunks::DATA).unwrap();
-// 	buf_writer.write_all(&data_size_bytes.to_ne_bytes()).unwrap(); // write the data size
-// 	buf_writer.write_all(&sample_bytes).unwrap(); // write the data
-// 	println!("Finished writing to file: {:?}", path.as_ref());
-// }
+	let sample_bytes = cast_slice::<S, u8>(&samples[..]);
+	let data_size_bytes = sample_bytes.len() as u32;
+	buf_writer.write_all(&DATA_ID).unwrap();
+	buf_writer.write_all(&data_size_bytes.to_ne_bytes()).unwrap(); // write the data size
+	buf_writer.write_all(&sample_bytes).unwrap(); // write the data
+	println!("Finished writing to file: {:?}", path.as_ref());
+}
