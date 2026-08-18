@@ -9,14 +9,160 @@ use std::path::Path;
 use bytemuck::cast_slice;
 
 /// Trait representing a type that can be used to read and seek.
-pub trait ReadSeek: Read + Seek {}
+trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
-pub enum SampleData {
-	I16(Vec<i16>),
-	I32(Vec<i32>),
-	F32(Vec<f32>),
-	F64(Vec<f64>),
+/// Module containing the functionality for converting between the supported audio sample types
+mod conversion {
+	/// Trait for converting between audio sample types
+	pub trait ConvertTo<T> {
+		fn convert_to(&self) -> T;
+	}
+
+	// From i16
+	impl ConvertTo<i16> for i16 {
+		#[inline(always)]
+		fn convert_to(&self) -> i16 {
+			*self
+		}
+	}
+
+	impl ConvertTo<i32> for i16 {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			(*self as i32) << 16
+		}
+	}
+
+	impl ConvertTo<f32> for i16 {
+		#[inline(always)]
+		fn convert_to(&self) -> f32 {
+			((*self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
+		}
+	}
+
+	impl ConvertTo<f64> for i16 {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			((*self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
+		}
+	}
+
+	// From i32
+	impl ConvertTo<i16> for i32 {
+		#[inline(always)]
+		fn convert_to(&self) -> i16 {
+			(*self >> 16) as i16
+		}
+	}
+
+	impl ConvertTo<i32> for i32 {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			*self
+		}
+	}
+
+	impl ConvertTo<f32> for i32 {
+		#[inline(always)]
+		fn convert_to(&self) -> f32 {
+			((*self as f32) / (i32::MAX as f32)).clamp(-1.0, 1.0)
+		}
+	}
+
+	impl ConvertTo<f64> for i32 {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			((*self as f64) / (i32::MAX as f64)).clamp(-1.0, 1.0)
+		}
+	}
+
+	// From f32
+	impl ConvertTo<i16> for f32 {
+		#[inline(always)]
+		fn convert_to(&self) -> i16 {
+			((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
+		}
+	}
+
+	impl ConvertTo<i32> for f32 {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
+		}
+	}
+
+	impl ConvertTo<f32> for f32 {
+		#[inline(always)]
+		fn convert_to(&self) -> f32 {
+			*self
+		}
+	}
+
+	impl ConvertTo<f64> for f32 {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			*self as f64
+		}
+	}
+
+	// From f64
+	impl ConvertTo<i16> for f64 {
+		#[inline(always)]
+		fn convert_to(&self) -> i16 {
+			((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
+		}
+	}
+
+	impl ConvertTo<i32> for f64 {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
+		}
+	}
+
+	impl ConvertTo<f32> for f64 {
+		#[inline(always)]
+		fn convert_to(&self) -> f32 {
+			*self as f32
+		}
+	}
+
+	impl ConvertTo<f64> for f64 {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			*self
+		}
+	}
+
+	// From raw bytes
+	impl ConvertTo<i16> for [u8; 2] {
+		#[inline(always)]
+		fn convert_to(&self) -> i16 {
+			i16::from_ne_bytes(*self)
+		}
+	}
+
+	impl ConvertTo<i32> for [u8; 4] {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			i32::from_ne_bytes(*self)
+		}
+	}
+
+	impl ConvertTo<f32> for [u8; 4] {
+		#[inline(always)]
+		fn convert_to(&self) -> f32 {
+			f32::from_ne_bytes(*self)
+		}
+	}
+
+	impl ConvertTo<f64> for [u8; 8] {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			f64::from_ne_bytes(*self)
+		}
+	}
 }
 
 /// Module containing the ``Chunk`` trait and the constants relating to the different chunks in a wav file.
@@ -514,6 +660,16 @@ mod wav_type {
 				WavType::Float64 | WavType::EFloat64 => FLOAT_64_BITS,
 			}
 		}
+
+		/// Converts the WavType to the number of bytes per sample.
+		pub const fn n_bytes(&self) -> usize {
+			match self {
+				WavType::Pcm16 | WavType::EPcm16 => std::mem::size_of::<i16>(),
+				WavType::Pcm32 | WavType::EPcm32 => std::mem::size_of::<i32>(),
+				WavType::Float32 | WavType::EFloat32 => std::mem::size_of::<f32>(),
+				WavType::Float64 | WavType::EFloat64 => std::mem::size_of::<f64>(),
+			}
+		}
 	}
 
 	/// Converts a tuple of format codes and bits per sample to a WavType.
@@ -543,6 +699,7 @@ mod wav_type {
 }
 
 use wav_type::WavType;
+use conversion::ConvertTo;
 
 mod header {
 	use std::{
@@ -647,6 +804,7 @@ mod header {
 			let current_file_size = riff_chunk_size; // RIFF + size + (chunk_size - 8)
 
 			// Create fmt chunk
+			// TODO: This should be its own function
 			let (main_format, sub_format) = match wav_type {
 				WavType::Pcm16 | WavType::Pcm32 => (
 					FormatCode::WAV_FORMAT_PCM,
@@ -801,116 +959,92 @@ mod header {
 	}
 }
 
-impl SampleData {
-	fn get_type(&self) -> WavType {
-		match self {
-			SampleData::I16(_) => WavType::Pcm16,
-			SampleData::I32(_) => WavType::Pcm32,
-			SampleData::F32(_) => WavType::Float32,
-			SampleData::F64(_) => WavType::Float64,
+const TARGET_TYPE: WavType = WavType::Float32;
+pub type SampleTarget = f32;
+
+pub struct Audio {
+	pub rate: usize,
+	pub samples: Vec<SampleTarget>,
+}
+
+impl Audio {
+	/// Converts a raw byte vec into a vector of samples of the target type
+	/// Using the passed generic as an intermediate
+	fn convert_samples<
+		T: ConvertTo<SampleTarget>,
+		const N: usize
+	>(buf: &Vec<u8>, channels: usize) -> Vec<SampleTarget>
+	where [u8; N]: ConvertTo<T> { // Make sure we have the right N to convert to the type
+		let (bytes, _) = buf.as_chunks::<N>();
+		let mut arr: Vec<SampleTarget> = vec![Default::default(); bytes.len() / channels];
+		// Convert everything to mono by averaging
+		for (idx, raw) in bytes.chunks_exact(channels).enumerate() {
+			// Use f64 as an intermediate because it will work with float and int targets
+			// We do technically lose a little bit of precision theoretically, but I don't think it will matter
+			let mut total: f64 = 0.0;
+			for channel_sample in raw {
+				// Convert it to T first to make sure that it goes to the right intermediate
+				let temp: T = (*channel_sample).convert_to();
+				// Then convert it to SampleTarget
+				let temp: SampleTarget = temp.convert_to();
+				total += temp as f64;
+			}
+			arr[idx] = (total / (channels as f64)) as SampleTarget;
 		}
+		arr
 	}
 
-	fn as_bytes(&self) -> &[u8] {
-		match self {
-			SampleData::I16(samples) => cast_slice::<i16, u8>(&samples[..]),
-			SampleData::I32(samples) => cast_slice::<i32, u8>(&samples[..]),
-			SampleData::F32(samples) => cast_slice::<f32, u8>(&samples[..]),
-			SampleData::F64(samples) => cast_slice::<f64, u8>(&samples[..]),
-		}
-	}
-
-	pub fn len(&self) -> usize {
-		match self {
-			SampleData::I16(samples) => samples.len(),
-			SampleData::I32(samples) => samples.len(),
-			SampleData::F32(samples) => samples.len(),
-			SampleData::F64(samples) => samples.len(),
-		}
-	}
-
-	/// Read the audio samples from the wav file.
-	pub fn read<P: AsRef<Path>>(path: P) -> Self {
-		let f = std::fs::File::open(path).unwrap();
+	pub fn read<P: AsRef<Path>>(path: P) -> Self {let f = std::fs::File::open(path).unwrap();
 		let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
 		let wav_info = header::read(&mut reader);
 
+		let rate = wav_info.wav_header.fmt_chunk.sample_rate as usize;
+		println!("Sampling Rate: {rate}");
 		let channels = wav_info.wav_header.fmt_chunk.channels as usize;
 		println!("Channels: {channels}");
 
+		let mut buf: Vec<u8> = vec![];
+		let _ = reader.read_to_end(&mut buf);
+
 		let wav_type = wav_info.wav_type;
-		match wav_type {
+		let samples = match wav_type {
 			WavType::Pcm16 | WavType::EPcm16 => {
-				let mut buf = [0; 2];
-				let mut arr: Vec<i16> = vec![];
-				loop {
-					if reader.read_exact(&mut buf).is_err() { break; }
-					arr.push(i16::from_ne_bytes(buf));
-					// Just ignore the rest of the channels
-					let _ = reader.seek_relative((buf.len() * (channels - 1)) as i64);
-				}
-				SampleData::I16(arr)
+				Audio::convert_samples::<i16, _>(&buf, channels)
 			}
 			WavType::Pcm32 | WavType::EPcm32 => {
-				let mut buf = [0; 4];
-				let mut arr: Vec<i32> = vec![];
-				loop {
-					if reader.read_exact(&mut buf).is_err() { break; }
-					arr.push(i32::from_ne_bytes(buf));
-					// Just ignore the rest of the channels
-					let _ = reader.seek_relative((buf.len() * (channels - 1)) as i64);
-				}
-				SampleData::I32(arr)
+				Audio::convert_samples::<i32, _>(&buf, channels)
 			}
 			WavType::Float32 | WavType::EFloat32 => {
-				let mut buf = [0; 4];
-				let mut arr: Vec<f32> = vec![];
-				loop {
-					if reader.read_exact(&mut buf).is_err() { break; }
-					arr.push(f32::from_ne_bytes(buf));
-					// Just ignore the rest of the channels
-					let _ = reader.seek_relative((buf.len() * (channels - 1)) as i64);
-				}
-				SampleData::F32(arr)
+				Audio::convert_samples::<f32, _>(&buf, channels)
 			}
 			WavType::Float64 | WavType::EFloat64 => {
-				let mut buf = [0; 8];
-				let mut arr: Vec<f64> = vec![];
-				loop {
-					if reader.read_exact(&mut buf).is_err() { break; }
-					arr.push(f64::from_ne_bytes(buf));
-					// Just ignore the rest of the channels
-					let _ = reader.seek_relative((buf.len() * (channels - 1)) as i64);
-				}
-				SampleData::F64(arr)
+				Audio::convert_samples::<f64, _>(&buf, channels)
 			}
-		}
+		};
+
+		Self { rate, samples }
 	}
 
-	pub fn write<P: AsRef<Path>>(&self, sample_rate: i32, p: P) {
-		let wav_header = header::WavHeader::new_header(sample_rate, 1, self.len(), self.get_type());
+	pub fn write<P: AsRef<Path>>(&self, path: P) {
+		let wav_header = header::WavHeader::new_header(
+			self.rate as i32,
+			1,
+			self.samples.len(),
+			TARGET_TYPE
+		);
 
-		let f = File::create(&p).unwrap();
+		let f = File::create(&path).unwrap();
 		let mut buf_writer: BufWriter<File> = BufWriter::new(f);
-		let sample_bytes = self.as_bytes();
-		let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
 
 		// Let's just pretend that extensible isn't real
 		let header_bytes = wav_header.as_base_bytes();
 		buf_writer.write_all(&header_bytes).unwrap();
 
+		let sample_bytes = cast_slice::<SampleTarget, u8>(&self.samples[..]);
+		let data_size_bytes = sample_bytes.len() as u32;
 		buf_writer.write_all(&chunks::DATA).unwrap();
 		buf_writer.write_all(&data_size_bytes.to_ne_bytes()).unwrap(); // write the data size
 		buf_writer.write_all(&sample_bytes).unwrap(); // write the data
-		println!("Finished writing to file: {:?}", p.as_ref());
+		println!("Finished writing to file: {:?}", path.as_ref());
 	}
-}
-
-/// Reads a wav file and returns the samples
-pub fn read<P: AsRef<Path>>(path: P) -> SampleData {
-	SampleData::read(path)
-}
-
-pub fn write<P: AsRef<Path>>(path: P, data: &SampleData) {
-	data.write(44100, path);
 }
