@@ -21,7 +21,6 @@ mod conversion {
 
 	// Trivial implementation for converting to self
 	impl<T: Copy> ConvertTo<T> for T {
-		#[inline(always)]
 		fn convert_to(&self) -> T {
 			*self
 		}
@@ -31,17 +30,15 @@ mod conversion {
 	// (src * (I::MAX as F)) as I
 
 	// int -> float
-	// ((src as F) / (I::MAX as F)).clamp(-1.0, 1.0)
+	// ((src as F) / (I::MAX as F))
 
 	// Integer -> Integer
 	impl ConvertTo<i32> for i16 {
-		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			(*self as i32) << 16
 		}
 	}
 	impl ConvertTo<i16> for i32 {
-		#[inline(always)]
 		fn convert_to(&self) -> i16 {
 			(*self >> 16) as i16
 		}
@@ -49,70 +46,56 @@ mod conversion {
 
 	// Integer -> Float
 	impl ConvertTo<f32> for i16 {
-		#[inline(always)]
 		fn convert_to(&self) -> f32 {
-			((*self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
+			(*self as f32) / (i16::MAX as f32)
 		}
 	}
 	impl ConvertTo<f64> for i16 {
-		#[inline(always)]
 		fn convert_to(&self) -> f64 {
-			((*self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
+			(*self as f64) / (i16::MAX as f64)
 		}
 	}
 	impl ConvertTo<f32> for i32 {
-		#[inline(always)]
 		fn convert_to(&self) -> f32 {
-			((*self as f32) / (i32::MAX as f32)).clamp(-1.0, 1.0)
+			(*self as f32) / (i32::MAX as f32)
 		}
 	}
 	impl ConvertTo<f64> for i32 {
-		#[inline(always)]
 		fn convert_to(&self) -> f64 {
-			((*self as f64) / (i32::MAX as f64)).clamp(-1.0, 1.0)
+			(*self as f64) / (i32::MAX as f64)
 		}
 	}
 
 	// Float -> Integer
+	// As of Rust 1.45 casting to int from float with "as" performs a saturating cast
 	impl ConvertTo<i16> for f32 {
-		#[inline(always)]
 		fn convert_to(&self) -> i16 {
-			// As of Rust 1.45 casting to int from float with "as" performs a saturating cast, so this works the same
 			(*self * (i16::MAX as f32)) as i16
-			// ((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
 		}
 	}
 	impl ConvertTo<i32> for f32 {
-		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			(*self * (i32::MAX as f32)) as i32
-			// ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
 		}
 	}
 	impl ConvertTo<i16> for f64 {
-		#[inline(always)]
 		fn convert_to(&self) -> i16 {
 			(*self * (i16::MAX as f64)) as i16
-			// ((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
 		}
 	}
 	impl ConvertTo<i32> for f64 {
-		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			(*self * (i32::MAX as f64)) as i32
-			// ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
 		}
 	}
 
 	// Float -> Float
 	impl ConvertTo<f64> for f32 {
-		#[inline(always)]
 		fn convert_to(&self) -> f64 {
 			*self as f64
 		}
 	}
 	impl ConvertTo<f32> for f64 {
-		#[inline(always)]
 		fn convert_to(&self) -> f32 {
 			*self as f32
 		}
@@ -120,25 +103,21 @@ mod conversion {
 
 	// From raw bytes
 	impl ConvertTo<i16> for [u8; 2] {
-		#[inline(always)]
 		fn convert_to(&self) -> i16 {
 			i16::from_ne_bytes(*self)
 		}
 	}
 	impl ConvertTo<i32> for [u8; 4] {
-		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			i32::from_ne_bytes(*self)
 		}
 	}
 	impl ConvertTo<f32> for [u8; 4] {
-		#[inline(always)]
 		fn convert_to(&self) -> f32 {
 			f32::from_ne_bytes(*self)
 		}
 	}
 	impl ConvertTo<f64> for [u8; 8] {
-		#[inline(always)]
 		fn convert_to(&self) -> f64 {
 			f64::from_ne_bytes(*self)
 		}
