@@ -912,8 +912,8 @@ pub trait AudioSample:
 {
 	const WAV_TYPE: WavType;
 }
-impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::EPcm16; }
-impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::EPcm32; }
+impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::Pcm16; }
+impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::Pcm32; }
 impl AudioSample for f32 { const WAV_TYPE: WavType = WavType::Float32; }
 impl AudioSample for f64 { const WAV_TYPE: WavType = WavType::Float64; }
 
@@ -1018,7 +1018,13 @@ mod test {
 	#[test]
 	fn saveload() {
 		let (samples, rate) = read::<i16, _>("./audio/Test A.wav");
-		write(samples, rate, "./audio/Test A Out.wav");
+		write(samples, rate, "./audio/Test A Out I16.wav");
+		let (samples, rate) = read::<i32, _>("./audio/Test A.wav");
+		write(samples, rate, "./audio/Test A Out I32.wav");
+		let (samples, rate) = read::<f32, _>("./audio/Test A.wav");
+		write(samples, rate, "./audio/Test A Out F32.wav");
+		let (samples, rate) = read::<f64, _>("./audio/Test A.wav");
+		write(samples, rate, "./audio/Test A Out F64.wav");
 	}
 
 	// Test saturating casting
