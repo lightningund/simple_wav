@@ -2,6 +2,8 @@
 // """Cleaned up""" (see: made worse and less robust in nearly every way in the name of simplicity)
 // Basically I wanted something super simple to read and write audio just with arrays of samples
 
+mod from_scratch;
+
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 use std::path::Path;
@@ -913,7 +915,6 @@ pub trait AudioSample:
 {
 	const WAV_TYPE: WavType;
 }
-// TODO: Base/Extended Option
 impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::EPcm16; }
 impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::EPcm32; }
 impl AudioSample for f32 { const WAV_TYPE: WavType = WavType::EFloat32; }
@@ -944,6 +945,7 @@ where
 	arr
 }
 
+/// Convert from one sample type to another
 pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST> {
 	samples.iter().map(ConvertTo::<DST>::convert_to).collect()
 }
@@ -1040,5 +1042,10 @@ mod test {
 		let f: f64 = -1_000_000.0;
 		let i: i16 = f as i16;
 		assert_eq!(i, i16::MIN);
+	}
+
+	#[test]
+	fn simple() {
+		let _ = from_scratch::read::<i16, _>("./audio/Test A.wav");
 	}
 }
