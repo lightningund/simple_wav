@@ -1037,3 +1037,19 @@ impl Audio {
 		println!("Finished writing to file: {:?}", path.as_ref());
 	}
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+	#[test]
+	fn saveload() {
+		let path = "./audio/Test A.wav";
+
+		let audio = Audio::read(path);
+
+		println!("Num samples: {}", audio.samples.len());
+
+		audio.write("./audio/Test A Out.wav");
+	}
+}
