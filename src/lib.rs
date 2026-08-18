@@ -26,12 +26,6 @@ mod conversion {
 		}
 	}
 
-	// float -> int
-	// (src * (I::MAX as F)) as I
-
-	// int -> float
-	// ((src as F) / (I::MAX as F))
-
 	// Integer -> Integer
 	impl ConvertTo<i32> for i16 {
 		fn convert_to(&self) -> i32 {
@@ -45,6 +39,7 @@ mod conversion {
 	}
 
 	// Integer -> Float
+	// Just divide by the maximum to get a range of -1 to 1
 	impl ConvertTo<f32> for i16 {
 		fn convert_to(&self) -> f32 {
 			(*self as f32) / (i16::MAX as f32)
@@ -801,9 +796,11 @@ mod header {
 			let fmt_bytes = self.fmt_chunk.as_bytes();
 			debug_assert!(
 				fmt_bytes.len() == FMT_SIZE_BASE_SIZE + 8,
-				"Fmt bytes length is not equal to the expected length: {} vs {}",
+				"Fmt bytes length is not equal to the expected length: {} vs {}.\nFull Format Chunk: {:?}\nFull Format Bytes: {:?}",
 				fmt_bytes.len(),
-				FMT_SIZE_BASE_SIZE + 8
+				FMT_SIZE_BASE_SIZE + 8,
+				self.fmt_chunk,
+				fmt_bytes
 			);
 			bytes[12..12 + fmt_bytes.len()].copy_from_slice(&fmt_bytes);
 			bytes
@@ -908,93 +905,110 @@ mod header {
 	}
 }
 
-const TARGET_TYPE: WavType = WavType::Float32;
-pub type SampleTarget = f32;
+/// Trait to mark a type as one of the available for being read/written in wav files
+pub trait AudioSample:
+	bytemuck::Pod + Default +
+	ConvertTo<i16> + ConvertTo<i32> + ConvertTo<f32> + ConvertTo<f64>
+{
+	const WAV_TYPE: WavType;
+}
+impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::EPcm16; }
+impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::EPcm32; }
+impl AudioSample for f32 { const WAV_TYPE: WavType = WavType::Float32; }
+impl AudioSample for f64 { const WAV_TYPE: WavType = WavType::Float64; }
 
-pub struct Audio {
-	pub rate: usize,
-	pub samples: Vec<SampleTarget>,
+/// Converts a raw byte vec into a vector of samples of the target type
+/// Using the passed generic as an intermediate
+fn convert_buffer<T: AudioSample, const N: usize>(buf: &Vec<u8>, channels: usize) -> Vec<T>
+where
+	[u8; N]: ConvertTo<T>, // Make sure we have the right N to convert to the type
+	f64: ConvertTo<T>,
+{
+	let (bytes, _) = buf.as_chunks::<N>();
+	let mut arr: Vec<T> = vec![Default::default(); bytes.len() / channels];
+	// Convert everything to mono by averaging
+	for (idx, raw) in bytes.chunks_exact(channels).enumerate() {
+		// Use f64 as an intermediate because it will work with float and int targets
+		// We do technically lose a little bit of precision theoretically, but I don't think it will matter
+		let mut total: f64 = 0.0;
+		for channel_sample in raw {
+			// Convert it to T
+			let temp: T = (*channel_sample).convert_to();
+			total += <T as ConvertTo<f64>>::convert_to(&temp);
+		}
+
+		arr[idx] = (total / (channels as f64)).convert_to();
+	}
+	arr
 }
 
-impl Audio {
-	/// Converts a raw byte vec into a vector of samples of the target type
-	/// Using the passed generic as an intermediate
-	fn convert_samples<
-		T: ConvertTo<SampleTarget>,
-		const N: usize
-	>(buf: &Vec<u8>, channels: usize) -> Vec<SampleTarget>
-	where [u8; N]: ConvertTo<T> { // Make sure we have the right N to convert to the type
-		let (bytes, _) = buf.as_chunks::<N>();
-		let mut arr: Vec<SampleTarget> = vec![Default::default(); bytes.len() / channels];
-		// Convert everything to mono by averaging
-		for (idx, raw) in bytes.chunks_exact(channels).enumerate() {
-			// Use f64 as an intermediate because it will work with float and int targets
-			// We do technically lose a little bit of precision theoretically, but I don't think it will matter
-			let mut total: f64 = 0.0;
-			for channel_sample in raw {
-				// Convert it to T first to make sure that it goes to the right intermediate
-				let temp: T = (*channel_sample).convert_to();
-				// Then convert it to SampleTarget
-				let temp: SampleTarget = temp.convert_to();
-				total += temp as f64;
-			}
-			arr[idx] = (total / (channels as f64)) as SampleTarget;
+pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST> {
+	samples.iter().map(ConvertTo::<DST>::convert_to).collect()
+}
+
+/// Returns a tuple of the samples and the rate
+pub fn read<S, P: AsRef<Path>>(path: P) -> (Vec<S>, usize)
+where
+	i16: ConvertTo<S>,
+	i32: ConvertTo<S>,
+	f32: ConvertTo<S>,
+	f64: ConvertTo<S>,
+{
+	let f = std::fs::File::open(path).unwrap();
+	let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
+	let wav_info = header::read(&mut reader);
+
+	let rate = wav_info.wav_header.fmt_chunk.sample_rate as usize;
+	println!("Sampling Rate: {rate}");
+	let channels = wav_info.wav_header.fmt_chunk.channels as usize;
+	println!("Channels: {channels}");
+
+	let mut buf: Vec<u8> = vec![];
+	let _ = reader.read_to_end(&mut buf);
+
+	let wav_type = wav_info.wav_type;
+	let samples = match wav_type {
+		WavType::Pcm16 | WavType::EPcm16 => {
+			let temp = convert_buffer::<i16, _>(&buf, channels);
+			convert_samples(&temp)
 		}
-		arr
-	}
+		WavType::Pcm32 | WavType::EPcm32 => {
+			let temp = convert_buffer::<i32, _>(&buf, channels);
+			convert_samples(&temp)
+		}
+		WavType::Float32 | WavType::EFloat32 => {
+			let temp = convert_buffer::<f32, _>(&buf, channels);
+			convert_samples(&temp)
+		}
+		WavType::Float64 | WavType::EFloat64 => {
+			let temp = convert_buffer::<f64, _>(&buf, channels);
+			convert_samples(&temp)
+		}
+	};
 
-	pub fn read<P: AsRef<Path>>(path: P) -> Self {let f = std::fs::File::open(path).unwrap();
-		let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
-		let wav_info = header::read(&mut reader);
+	(samples, rate)
+}
 
-		let rate = wav_info.wav_header.fmt_chunk.sample_rate as usize;
-		println!("Sampling Rate: {rate}");
-		let channels = wav_info.wav_header.fmt_chunk.channels as usize;
-		println!("Channels: {channels}");
+pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) {
+	let wav_header = header::WavHeader::new_header(
+		rate as i32,
+		1,
+		samples.len(),
+		S::WAV_TYPE
+	);
 
-		let mut buf: Vec<u8> = vec![];
-		let _ = reader.read_to_end(&mut buf);
+	let f = File::create(&path).unwrap();
+	let mut buf_writer: BufWriter<File> = BufWriter::new(f);
 
-		let wav_type = wav_info.wav_type;
-		let samples = match wav_type {
-			WavType::Pcm16 | WavType::EPcm16 => {
-				Audio::convert_samples::<i16, _>(&buf, channels)
-			}
-			WavType::Pcm32 | WavType::EPcm32 => {
-				Audio::convert_samples::<i32, _>(&buf, channels)
-			}
-			WavType::Float32 | WavType::EFloat32 => {
-				Audio::convert_samples::<f32, _>(&buf, channels)
-			}
-			WavType::Float64 | WavType::EFloat64 => {
-				Audio::convert_samples::<f64, _>(&buf, channels)
-			}
-		};
+	let header_bytes = wav_header.as_base_bytes();
+	buf_writer.write_all(&header_bytes).unwrap();
 
-		Self { rate, samples }
-	}
-
-	pub fn write<P: AsRef<Path>>(&self, path: P) {
-		let wav_header = header::WavHeader::new_header(
-			self.rate as i32,
-			1,
-			self.samples.len(),
-			TARGET_TYPE
-		);
-
-		let f = File::create(&path).unwrap();
-		let mut buf_writer: BufWriter<File> = BufWriter::new(f);
-
-		let header_bytes = wav_header.as_base_bytes();
-		buf_writer.write_all(&header_bytes).unwrap();
-
-		let sample_bytes = cast_slice::<SampleTarget, u8>(&self.samples[..]);
-		let data_size_bytes = sample_bytes.len() as u32;
-		buf_writer.write_all(&chunks::DATA).unwrap();
-		buf_writer.write_all(&data_size_bytes.to_ne_bytes()).unwrap(); // write the data size
-		buf_writer.write_all(&sample_bytes).unwrap(); // write the data
-		println!("Finished writing to file: {:?}", path.as_ref());
-	}
+	let sample_bytes = cast_slice::<S, u8>(&samples[..]);
+	let data_size_bytes = sample_bytes.len() as u32;
+	buf_writer.write_all(&chunks::DATA).unwrap();
+	buf_writer.write_all(&data_size_bytes.to_ne_bytes()).unwrap(); // write the data size
+	buf_writer.write_all(&sample_bytes).unwrap(); // write the data
+	println!("Finished writing to file: {:?}", path.as_ref());
 }
 
 #[cfg(test)]
@@ -1003,10 +1017,11 @@ mod test {
 
 	#[test]
 	fn saveload() {
-		let audio = Audio::read("./audio/Test A.wav");
-		audio.write("./audio/Test A Out.wav");
+		let (samples, rate) = read::<i16, _>("./audio/Test A.wav");
+		write(samples, rate, "./audio/Test A Out.wav");
 	}
 
+	// Test saturating casting
 	#[test]
 	fn casting() {
 		let f: f64 = 1_000_000.0;

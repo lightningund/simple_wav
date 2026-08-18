@@ -1,5 +1,6 @@
 -[ ] Allow the user to call it with the type they want
--[ ] Allow conversions between sample types of already read wavs
+-[X] Allow conversions between sample types of already read wavs
 -[ ] Support i24
 -[ ] Support writing EXT format
 -[ ] Support multi-channel
+-[ ] STOP UNWRAPPING EVERYTHING
