@@ -1,4 +1,4 @@
-// Ripped near directly from https://github.com/jmg049/wavers/
+// Originally ripped near directly from https://github.com/jmg049/wavers/
 // """Cleaned up""" (see: made worse and less robust in nearly every way in the name of simplicity)
 // Basically I wanted something super simple to read and write audio just with arrays of samples
 
@@ -19,36 +19,27 @@ mod conversion {
 		fn convert_to(&self) -> T;
 	}
 
-	// From i16
-	impl ConvertTo<i16> for i16 {
+	// Trivial implementation for converting to self
+	impl<T: Copy> ConvertTo<T> for T {
 		#[inline(always)]
-		fn convert_to(&self) -> i16 {
+		fn convert_to(&self) -> T {
 			*self
 		}
 	}
 
+	// float -> int
+	// (src * (I::MAX as F)) as I
+
+	// int -> float
+	// ((src as F) / (I::MAX as F)).clamp(-1.0, 1.0)
+
+	// Integer -> Integer
 	impl ConvertTo<i32> for i16 {
 		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			(*self as i32) << 16
 		}
 	}
-
-	impl ConvertTo<f32> for i16 {
-		#[inline(always)]
-		fn convert_to(&self) -> f32 {
-			((*self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
-		}
-	}
-
-	impl ConvertTo<f64> for i16 {
-		#[inline(always)]
-		fn convert_to(&self) -> f64 {
-			((*self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
-		}
-	}
-
-	// From i32
 	impl ConvertTo<i16> for i32 {
 		#[inline(always)]
 		fn convert_to(&self) -> i16 {
@@ -56,20 +47,25 @@ mod conversion {
 		}
 	}
 
-	impl ConvertTo<i32> for i32 {
+	// Integer -> Float
+	impl ConvertTo<f32> for i16 {
 		#[inline(always)]
-		fn convert_to(&self) -> i32 {
-			*self
+		fn convert_to(&self) -> f32 {
+			((*self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
 		}
 	}
-
+	impl ConvertTo<f64> for i16 {
+		#[inline(always)]
+		fn convert_to(&self) -> f64 {
+			((*self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
+		}
+	}
 	impl ConvertTo<f32> for i32 {
 		#[inline(always)]
 		fn convert_to(&self) -> f32 {
 			((*self as f32) / (i32::MAX as f32)).clamp(-1.0, 1.0)
 		}
 	}
-
 	impl ConvertTo<f64> for i32 {
 		#[inline(always)]
 		fn convert_to(&self) -> f64 {
@@ -77,61 +73,48 @@ mod conversion {
 		}
 	}
 
-	// From f32
+	// Float -> Integer
 	impl ConvertTo<i16> for f32 {
 		#[inline(always)]
 		fn convert_to(&self) -> i16 {
-			((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
+			// As of Rust 1.45 casting to int from float with "as" performs a saturating cast, so this works the same
+			(*self * (i16::MAX as f32)) as i16
+			// ((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
 		}
 	}
-
 	impl ConvertTo<i32> for f32 {
 		#[inline(always)]
 		fn convert_to(&self) -> i32 {
-			((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
+			(*self * (i32::MAX as f32)) as i32
+			// ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
 		}
 	}
-
-	impl ConvertTo<f32> for f32 {
+	impl ConvertTo<i16> for f64 {
 		#[inline(always)]
-		fn convert_to(&self) -> f32 {
-			*self
+		fn convert_to(&self) -> i16 {
+			(*self * (i16::MAX as f64)) as i16
+			// ((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
+		}
+	}
+	impl ConvertTo<i32> for f64 {
+		#[inline(always)]
+		fn convert_to(&self) -> i32 {
+			(*self * (i32::MAX as f64)) as i32
+			// ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
 		}
 	}
 
+	// Float -> Float
 	impl ConvertTo<f64> for f32 {
 		#[inline(always)]
 		fn convert_to(&self) -> f64 {
 			*self as f64
 		}
 	}
-
-	// From f64
-	impl ConvertTo<i16> for f64 {
-		#[inline(always)]
-		fn convert_to(&self) -> i16 {
-			((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
-		}
-	}
-
-	impl ConvertTo<i32> for f64 {
-		#[inline(always)]
-		fn convert_to(&self) -> i32 {
-			((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
-		}
-	}
-
 	impl ConvertTo<f32> for f64 {
 		#[inline(always)]
 		fn convert_to(&self) -> f32 {
 			*self as f32
-		}
-	}
-
-	impl ConvertTo<f64> for f64 {
-		#[inline(always)]
-		fn convert_to(&self) -> f64 {
-			*self
 		}
 	}
 
@@ -142,21 +125,18 @@ mod conversion {
 			i16::from_ne_bytes(*self)
 		}
 	}
-
 	impl ConvertTo<i32> for [u8; 4] {
 		#[inline(always)]
 		fn convert_to(&self) -> i32 {
 			i32::from_ne_bytes(*self)
 		}
 	}
-
 	impl ConvertTo<f32> for [u8; 4] {
 		#[inline(always)]
 		fn convert_to(&self) -> f32 {
 			f32::from_ne_bytes(*self)
 		}
 	}
-
 	impl ConvertTo<f64> for [u8; 8] {
 		#[inline(always)]
 		fn convert_to(&self) -> f64 {
@@ -1044,12 +1024,17 @@ mod test {
 
 	#[test]
 	fn saveload() {
-		let path = "./audio/Test A.wav";
-
-		let audio = Audio::read(path);
-
-		println!("Num samples: {}", audio.samples.len());
-
+		let audio = Audio::read("./audio/Test A.wav");
 		audio.write("./audio/Test A Out.wav");
+	}
+
+	#[test]
+	fn casting() {
+		let f: f64 = 1_000_000.0;
+		let i: i16 = f as i16;
+		assert_eq!(i, i16::MAX);
+		let f: f64 = -1_000_000.0;
+		let i: i16 = f as i16;
+		assert_eq!(i, i16::MIN);
 	}
 }
