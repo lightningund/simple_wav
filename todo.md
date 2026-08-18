@@ -1,4 +1,4 @@
--[ ] Allow the user to call it with the type they want
+-[X] Allow the user to call it with the type they want
 -[X] Allow conversions between sample types of already read wavs
 -[ ] Support i24
 -[ ] Support writing EXT format
