@@ -430,22 +430,22 @@ mod chunks {
 			match self.is_extended_format() {
 				true => match self.ext_fmt_chunk.cb_size {
 					CbSize::Base => {
-						let mut bytes: [u8; FMT_CB_SIZE + 8] = [0; FMT_CB_SIZE + 8];
-						bytes[0..4].copy_from_slice(&FACT);
+						let mut bytes = [0; FMT_CB_SIZE + 8];
+						bytes[0..4].copy_from_slice(&FMT);
 						bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
 						bytes[8..FMT_CB_SIZE + 8].copy_from_slice(&self.cb_bytes());
 						Box::new(bytes)
 					}
 					CbSize::Extended => {
-						let mut bytes: [u8; FMT_SIZE_EXTENDED_SIZE + 8] = [0; FMT_SIZE_EXTENDED_SIZE + 8];
-						bytes[0..4].copy_from_slice(&FACT);
+						let mut bytes = [0; FMT_SIZE_EXTENDED_SIZE + 8];
+						bytes[0..4].copy_from_slice(&FMT);
 						bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
 						bytes[8..FMT_SIZE_EXTENDED_SIZE + 8].copy_from_slice(&self.extended_bytes());
 						Box::new(bytes)
 					}
 				},
 				false => {
-					let mut bytes: [u8; FMT_SIZE_BASE_SIZE + 8] = [0; FMT_SIZE_BASE_SIZE + 8];
+					let mut bytes = [0; FMT_SIZE_BASE_SIZE + 8];
 					bytes[0..4].copy_from_slice(&FMT);
 					bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
 					bytes[8..FMT_SIZE_BASE_SIZE + 8].copy_from_slice(&self.base_bytes());
@@ -645,6 +645,7 @@ mod header {
 
 	const _RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
 	const HEADER_FMT_BASE_SIZE: usize = 36;
+	const HEADER_FMT_EXTENDED_SIZE: usize = 60;
 
 	/// Struct representing the information of a wav file.
 	#[derive(Debug, Clone, PartialEq, Eq)]
@@ -751,7 +752,9 @@ mod header {
 				),
 			};
 
-			let ext_fmt_chunk = ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, sub_format);
+			// TODO: CB/Extended Option
+			// let ext_fmt_chunk = ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, sub_format);
+			let ext_fmt_chunk = ExtFmtChunkInfo::new(CbSize::Extended, bits_per_sample, 0, sub_format);
 
 			let fmt_chunk = FmtChunk::new(
 				main_format,
@@ -785,6 +788,18 @@ mod header {
 				self.fmt_chunk,
 				fmt_bytes
 			);
+			bytes[12..12 + fmt_bytes.len()].copy_from_slice(&fmt_bytes);
+			bytes
+		}
+
+		/// Returns the header in bytes, assuming that the FmtChunk is in the extensible format.
+		pub fn as_extended_bytes(&self) -> [u8; HEADER_FMT_EXTENDED_SIZE] {
+			let mut bytes = [0; HEADER_FMT_EXTENDED_SIZE];
+			bytes[0..4].copy_from_slice(&RIFF);
+			let size = self.current_file_size as u32;
+			bytes[4..8].copy_from_slice(&size.to_ne_bytes());
+			bytes[8..12].copy_from_slice(&WAVE);
+			let fmt_bytes = self.fmt_chunk.as_bytes();
 			bytes[12..12 + fmt_bytes.len()].copy_from_slice(&fmt_bytes);
 			bytes
 		}
@@ -898,10 +913,11 @@ pub trait AudioSample:
 {
 	const WAV_TYPE: WavType;
 }
-impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::Pcm16; }
-impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::Pcm32; }
-impl AudioSample for f32 { const WAV_TYPE: WavType = WavType::Float32; }
-impl AudioSample for f64 { const WAV_TYPE: WavType = WavType::Float64; }
+// TODO: Base/Extended Option
+impl AudioSample for i16 { const WAV_TYPE: WavType = WavType::EPcm16; }
+impl AudioSample for i32 { const WAV_TYPE: WavType = WavType::EPcm32; }
+impl AudioSample for f32 { const WAV_TYPE: WavType = WavType::EFloat32; }
+impl AudioSample for f64 { const WAV_TYPE: WavType = WavType::EFloat64; }
 
 /// Converts a raw byte vec into a vector of samples of the target type
 /// Using the passed generic as an intermediate
@@ -986,7 +1002,9 @@ pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path:
 	let f = File::create(&path).unwrap();
 	let mut buf_writer: BufWriter<File> = BufWriter::new(f);
 
-	let header_bytes = wav_header.as_base_bytes();
+	// TODO: Base/CB/Extended Option
+	let header_bytes = wav_header.as_extended_bytes();
+	// let header_bytes = wav_header.as_base_bytes();
 	buf_writer.write_all(&header_bytes).unwrap();
 
 	let sample_bytes = cast_slice::<S, u8>(&samples[..]);
