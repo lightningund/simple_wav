@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 use std::path::Path;
 
+use std::io::Result as ioResult;
+
 use bytemuck::cast_slice;
 
 /// Trait representing a type that can be used to read and seek.
@@ -131,7 +133,6 @@ enum WaveFormat {
 	IEEE_FLOAT = 0x0003,
 	ALAW = 0x0006,
 	MULAW = 0x0007,
-	EXTENSIBLE = 0xFFFE
 }
 
 /// Make sure the next however many bytes are the same as the ones passed
@@ -146,30 +147,33 @@ fn confirm_bytes<const N: usize>(reader: &mut Box<dyn ReadSeek>, target: [u8; N]
 }
 
 /// Reads two bytes and converts them to a u16, assuming little endian
-fn read_u16(reader: &mut Box<dyn ReadSeek>) -> u16 {
+fn read_u16(reader: &mut Box<dyn ReadSeek>) -> ioResult<u16> {
 	let mut buf = [0; 2];
-	reader.read_exact(&mut buf);
-	u16::from_le_bytes(buf)
+	reader.read_exact(&mut buf)?;
+	Ok(u16::from_le_bytes(buf))
 }
 
 /// Reads four bytes and converts them to a u32, assuming little endian
-fn read_u32(reader: &mut Box<dyn ReadSeek>) -> u32 {
+fn read_u32(reader: &mut Box<dyn ReadSeek>) -> ioResult<u32> {
 	let mut buf = [0; 4];
-	reader.read_exact(&mut buf);
-	u32::from_le_bytes(buf)
+	reader.read_exact(&mut buf)?;
+	Ok(u32::from_le_bytes(buf))
 }
 
-fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
-	Vec<u8>, // Raw buffer of the samples
-	SampleType, // The sample type
-	u32, // The sample rate
-	u16, // The number of channels
-) {
+/// Just the absolute minimum of important information in a wav file
+struct MinWav {
+	data_buffer: Vec<u8>, // Raw buffer of the samples
+	sample_type: SampleType, // The sample type
+	sample_rate: u32, // The sample rate
+	channels: u16, // The number of channels
+}
+
+fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	// First 4 bytes need to be RIFF
 	confirm_bytes(reader, RIFF_ID);
 
 	// UNUSED: Total file size
-	reader.seek_relative(4);
+	reader.seek_relative(4)?;
 
 	// Then needs say WAVE
 	confirm_bytes(reader, WAVE_ID);
@@ -188,27 +192,27 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
 		if id_buf == FMT_ID {
 			fmt_read = true;
 			// First 4: Size of this chunk
-			let chunk_size = read_u32(reader);
+			let chunk_size = read_u32(reader)?;
 			// Next 2: WaveFormat
-			let mut wave_format = read_u16(reader);
+			let mut wave_format = read_u16(reader)?;
 			// Next 2: # Channels
-			channels = read_u16(reader);
+			channels = read_u16(reader)?;
 			// Next 4: Sample Rate
-			sample_rate = read_u32(reader);
+			sample_rate = read_u32(reader)?;
 			// Skip 6: Bytes/Sec (4), Block align (2)
-			reader.seek_relative(6);
+			reader.seek_relative(6)?;
 			// Next 2: Sample size in bits
-			let sample_size = read_u16(reader);
+			let sample_size = read_u16(reader)?;
 			if chunk_size > 16 {
 				// Skip 2: Extension Size (2)
-				reader.seek_relative(2);
+				reader.seek_relative(2)?;
 				if chunk_size > 18 {
 					// Skip 6: Sample size in bits (2), Speaker positions (4), GUID (16)
-					reader.seek_relative(6);
+					reader.seek_relative(6)?;
 					// Next 2: Subformat
-					wave_format = read_u16(reader);
+					wave_format = read_u16(reader)?;
 					// Skip 14: Fixed string of the GUID for some reason
-					reader.seek_relative(14);
+					reader.seek_relative(14)?;
 				}
 			}
 
@@ -223,23 +227,23 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
 					else if sample_size == 64 { SampleType::F64 }
 					else { panic!("Invalid IEEE Float sample width {}", sample_size) }
 				} else {
-					panic!("Unsupported Format!")
+					panic!("Unsupported Format {}", wave_format)
 				};
 
 			println!("{:?}", sample_type);
 		} else if id_buf == DATA_ID {
 			data_read = true;
 			// First 4: length of the data buffer in bytes
-			let buffer_size = read_u32(reader);
+			let buffer_size = read_u32(reader)?;
 			data_buffer = vec![0; buffer_size as usize];
-			reader.read_exact(&mut data_buffer);
+			reader.read_exact(&mut data_buffer)?;
 		}
 	}
 
 	if !fmt_read { panic!("File didn't have a format chunk!") }
 	if !data_read { panic!("File didn't have a data chunk!") }
 
-	(data_buffer, sample_type, sample_rate, channels)
+	Ok(MinWav{ data_buffer, sample_type, sample_rate, channels })
 }
 
 use conversion::ConvertTo;
@@ -288,7 +292,7 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 
 /// Returns a tuple of the samples and the rate
 #[allow(unused)]
-pub fn read<S, P: AsRef<Path>>(path: P) -> (Vec<S>, usize)
+pub fn read<S, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
 	i32: ConvertTo<S>,
@@ -297,34 +301,34 @@ where
 {
 	let f = std::fs::File::open(path).unwrap();
 	let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
-	let (buf, wav_type, rate, channels) = read_chunks(&mut reader);
+	let MinWav { data_buffer, sample_type, sample_rate, channels } = read_chunks(&mut reader)?;
 
 	let channels = channels as usize;
-	let rate = rate as usize;
+	let rate = sample_rate as usize;
 
 	println!("Sampling Rate: {rate}");
 	println!("Channels: {channels}");
 
-	let samples = match wav_type {
+	let samples = match sample_type {
 		SampleType::I16 => {
-			let temp = convert_buffer::<i16, _>(&buf, channels);
+			let temp = convert_buffer::<i16, _>(&data_buffer, channels);
 			convert_samples(&temp)
 		}
 		SampleType::I32 => {
-			let temp = convert_buffer::<i32, _>(&buf, channels);
+			let temp = convert_buffer::<i32, _>(&data_buffer, channels);
 			convert_samples(&temp)
 		}
 		SampleType::F32 => {
-			let temp = convert_buffer::<f32, _>(&buf, channels);
+			let temp = convert_buffer::<f32, _>(&data_buffer, channels);
 			convert_samples(&temp)
 		}
 		SampleType::F64 => {
-			let temp = convert_buffer::<f64, _>(&buf, channels);
+			let temp = convert_buffer::<f64, _>(&data_buffer, channels);
 			convert_samples(&temp)
 		}
 	};
 
-	(samples, rate)
+	Ok((samples, rate))
 }
 
 // pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) {
