@@ -473,41 +473,39 @@ mod chunks {
 				bits_per_sample: u16,
 			) -> [u8; std::mem::size_of::<Self>()] {
 				let mut bytes = [0; std::mem::size_of::<Self>()];
+
 				let cb_size = CbSize::Base as u16;
-				let channel_mask: i32 = 0;
-
-				let sub_format = format_code;
-				let guid = EXTENDED_FMT_GUID;
-
 				let cb_size_bytes = cb_size.to_ne_bytes();
-				let valid_bits_per_sample_bytes = bits_per_sample.to_ne_bytes();
-				let channel_mask_bytes = channel_mask.to_ne_bytes();
-				let sub_format_bytes = sub_format.to_ne_bytes();
-
 				let mut i = 0;
 				while i < cb_size_bytes.len() {
 					bytes[i] = cb_size_bytes[i];
 					i += 1;
 				}
 
+				let valid_bits_per_sample_bytes = bits_per_sample.to_ne_bytes();
 				let mut i = 0;
 				while i < valid_bits_per_sample_bytes.len() {
 					bytes[i + 2] = valid_bits_per_sample_bytes[i];
 					i += 1;
 				}
 
+				let channel_mask: i32 = 0;
+				let channel_mask_bytes = channel_mask.to_ne_bytes();
 				let mut i = 0;
 				while i < channel_mask_bytes.len() {
 					bytes[i + 4] = channel_mask_bytes[i];
 					i += 1;
 				}
 
+				let sub_format = format_code;
+				let sub_format_bytes = sub_format.to_ne_bytes();
 				let mut i = 0;
 				while i < sub_format_bytes.len() {
 					bytes[i + 8] = sub_format_bytes[i];
 					i += 1;
 				}
 
+				let guid = EXTENDED_FMT_GUID;
 				let mut i = 0;
 				while i < guid.len() {
 					bytes[i + 10] = guid[i];
@@ -548,19 +546,11 @@ mod chunks {
 
 	pub use fmt::FmtChunk;
 
-	// 100% necessary to have these chunks
-
-	///The RIFF chunk ID "RIFF"
+	// Chunk IDs
 	pub const RIFF: [u8; 4] = *b"RIFF";
-	/// The WAVE chunk ID "WAVE"
 	pub const WAVE: [u8; 4] = *b"WAVE";
-	/// The data chunk ID "data"
 	pub const DATA: [u8; 4] = *b"data";
-	/// The fmt chunk ID "fmt "
 	pub const FMT: [u8; 4] = *b"fmt ";
-
-	// Optional chunks
-	/// The fact chunk ID "fact"
 	pub const FACT: [u8; 4] = *b"fact";
 
 	/// A trait representing a chunk in a wav file.
@@ -934,7 +924,7 @@ mod header {
 		// reset the buffer reader to the start of the file
 		readable.seek(SeekFrom::Start(0)).unwrap();
 
-		let header_info: HashMap<ChunkIdentifier, HeaderChunkInfo> = discover_all_header_chunks(readable);
+		let header_info = discover_all_header_chunks(readable);
 
 		if !header_info.contains_key(&FMT.into()) {
 			panic!("File does not contain a fmt chunk");
@@ -1036,7 +1026,6 @@ impl Audio {
 		let f = File::create(&path).unwrap();
 		let mut buf_writer: BufWriter<File> = BufWriter::new(f);
 
-		// Let's just pretend that extensible isn't real
 		let header_bytes = wav_header.as_base_bytes();
 		buf_writer.write_all(&header_bytes).unwrap();
 
