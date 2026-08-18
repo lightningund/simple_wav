@@ -187,27 +187,18 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
 	while !data_read && reader.read_exact(&mut id_buf).is_ok() {
 		if id_buf == FMT_ID {
 			fmt_read = true;
-			// Reusable buffers
-			let mut buf4 = [0; 4];
-			let mut buf2 = [0; 2];
 			// First 4: Size of this chunk
-			reader.read_exact(&mut buf4);
-			let chunk_size = u32::from_le_bytes(buf4);
+			let chunk_size = read_u32(reader);
 			// Next 2: WaveFormat
-			reader.read_exact(&mut buf2);
-			// This is Native Endian because we're comparing to hex literals rather than numbers
-			let mut wave_format = u16::from_ne_bytes(buf2);
+			let mut wave_format = read_u16(reader);
 			// Next 2: # Channels
-			reader.read_exact(&mut buf2);
-			channels = u16::from_le_bytes(buf2);
+			channels = read_u16(reader);
 			// Next 4: Sample Rate
-			reader.read_exact(&mut buf4);
-			sample_rate = u32::from_le_bytes(buf4);
+			sample_rate = read_u32(reader);
 			// Skip 6: Bytes/Sec (4), Block align (2)
 			reader.seek_relative(6);
 			// Next 2: Sample size in bits
-			reader.read_exact(&mut buf2);
-			let sample_size = u16::from_le_bytes(buf2);
+			let sample_size = read_u16(reader);
 			if chunk_size > 16 {
 				// Skip 2: Extension Size (2)
 				reader.seek_relative(2);
@@ -215,9 +206,7 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
 					// Skip 6: Sample size in bits (2), Speaker positions (4), GUID (16)
 					reader.seek_relative(6);
 					// Next 2: Subformat
-					reader.read_exact(&mut buf2);
-					// This is Native Endian because we're comparing to hex literals rather than numbers
-					wave_format = u16::from_ne_bytes(buf2);
+					wave_format = read_u16(reader);
 					// Skip 14: Fixed string of the GUID for some reason
 					reader.seek_relative(14);
 				}
@@ -241,9 +230,7 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> (
 		} else if id_buf == DATA_ID {
 			data_read = true;
 			// First 4: length of the data buffer in bytes
-			let mut buf = [0; 4];
-			reader.read_exact(&mut buf);
-			let buffer_size = u32::from_le_bytes(buf);
+			let buffer_size = read_u32(reader);
 			data_buffer = vec![0; buffer_size as usize];
 			reader.read_exact(&mut data_buffer);
 		}
