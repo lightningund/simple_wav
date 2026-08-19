@@ -11,7 +11,7 @@ trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SampleType { I16, I32, F32, F64 }
+pub enum SampleType { I16, I32, F32, F64 }
 
 /// Module containing the functionality for converting between the supported audio sample types
 mod conversion {
@@ -144,7 +144,8 @@ enum WaveFormat {
 /// Advances the reader forward by N
 fn confirm_bytes<const N: usize>(reader: &mut Box<dyn ReadSeek>, target: [u8; N]) {
 	let mut buf = [0; N];
-	reader.read_exact(&mut buf);
+	// we unwrap here because if anything goes wrong we're gonna panic at the assert anyway
+	reader.read_exact(&mut buf).unwrap();
 	assert_eq!(buf, target);
 }
 
@@ -367,14 +368,14 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 
 /// Returns a tuple of the samples and the rate
 #[allow(unused)]
-pub fn read<S: Default + Copy + ConvertTo<f64>, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
+pub fn read<S, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
 	i32: ConvertTo<S>,
 	f32: ConvertTo<S>,
 	f64: ConvertTo<S>,
 {
-	let f = std::fs::File::open(path).unwrap();
+	let f = std::fs::File::open(path)?;
 	let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
 	let MinWav { data_buffer, sample_type, sample_rate, channels } = read_chunks(&mut reader)?;
 
@@ -387,23 +388,27 @@ where
 	let samples = match sample_type {
 		SampleType::I16 => {
 			let temp = cast_slice::<u8, i16>(&data_buffer[..]);
-			convert_samples(&temp.to_vec())
+			let temp = merge_channels::<i16>(&temp.to_vec(), channels);
+			convert_samples(&temp)
 		}
 		SampleType::I32 => {
 			let temp = cast_slice::<u8, i32>(&data_buffer[..]);
-			convert_samples(&temp.to_vec())
+			let temp = merge_channels::<i32>(&temp.to_vec(), channels);
+			convert_samples(&temp)
 		}
 		SampleType::F32 => {
 			let temp = cast_slice::<u8, f32>(&data_buffer[..]);
-			convert_samples(&temp.to_vec())
+			let temp = merge_channels::<f32>(&temp.to_vec(), channels);
+			convert_samples(&temp)
 		}
 		SampleType::F64 => {
 			let temp = cast_slice::<u8, f64>(&data_buffer[..]);
-			convert_samples(&temp.to_vec())
+			let temp = merge_channels::<f64>(&temp.to_vec(), channels);
+			convert_samples(&temp)
 		}
 	};
 
-	Ok((merge_channels(&samples, channels), rate))
+	Ok((samples, rate))
 }
 
 #[allow(unused)]
@@ -418,7 +423,7 @@ pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path:
 		channels: 1
 	};
 
-	let f = File::create(&path).unwrap();
+	let f = File::create(&path)?;
 	let mut writer: Box<dyn Write> = Box::new(BufWriter::new(f));
 
 	write_chunks(&mut writer, &wav_data)?;
