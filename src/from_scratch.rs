@@ -335,23 +335,16 @@ impl AudioSample for i32 { const WAV_TYPE: SampleType = SampleType::I32; }
 impl AudioSample for f32 { const WAV_TYPE: SampleType = SampleType::F32; }
 impl AudioSample for f64 { const WAV_TYPE: SampleType = SampleType::F64; }
 
-/// Converts a raw byte vec into a vector of samples of the target type, averaging together all the channels
-fn convert_buffer<T: AudioSample, const N: usize>(buf: &Vec<u8>, channels: usize) -> Vec<T>
-where
-	[u8; N]: ConvertTo<T>, // Make sure we have the right N to convert to the type
-	f64: ConvertTo<T>,
-{
-	let (bytes, _) = buf.as_chunks::<N>();
-	let mut arr: Vec<T> = vec![Default::default(); bytes.len() / channels];
+fn merge_channels<T: Default + Copy + ConvertTo<f64>>(samples: &Vec<T>, channels: usize) -> Vec<T>
+where f64: ConvertTo<T> {
+	let mut arr: Vec<T> = vec![Default::default(); samples.len() / channels];
 	// Convert everything to mono by averaging
-	for (idx, raw) in bytes.chunks_exact(channels).enumerate() {
+	for (idx, raw) in samples.chunks_exact(channels).enumerate() {
 		// Use f64 as an intermediate because it will work with float and int targets
 		// We do technically lose a little bit of precision theoretically, but I don't think it will matter
 		let mut total: f64 = 0.0;
 		for channel_sample in raw {
-			// Convert it to T
-			let temp: T = (*channel_sample).convert_to();
-			total += <T as ConvertTo<f64>>::convert_to(&temp);
+			total += channel_sample.convert_to();
 		}
 
 		arr[idx] = (total / (channels as f64)).convert_to();
@@ -366,7 +359,7 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 
 /// Returns a tuple of the samples and the rate
 #[allow(unused)]
-pub fn read<S, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
+pub fn read<S: Default + Copy + ConvertTo<f64>, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
 	i32: ConvertTo<S>,
@@ -385,24 +378,24 @@ where
 
 	let samples = match sample_type {
 		SampleType::I16 => {
-			let temp = convert_buffer::<i16, _>(&data_buffer, channels);
-			convert_samples(&temp)
+			let temp = cast_slice::<u8, i16>(&data_buffer[..]);
+			convert_samples(&temp.to_vec())
 		}
 		SampleType::I32 => {
-			let temp = convert_buffer::<i32, _>(&data_buffer, channels);
-			convert_samples(&temp)
+			let temp = cast_slice::<u8, i32>(&data_buffer[..]);
+			convert_samples(&temp.to_vec())
 		}
 		SampleType::F32 => {
-			let temp = convert_buffer::<f32, _>(&data_buffer, channels);
-			convert_samples(&temp)
+			let temp = cast_slice::<u8, f32>(&data_buffer[..]);
+			convert_samples(&temp.to_vec())
 		}
 		SampleType::F64 => {
-			let temp = convert_buffer::<f64, _>(&data_buffer, channels);
-			convert_samples(&temp)
+			let temp = cast_slice::<u8, f64>(&data_buffer[..]);
+			convert_samples(&temp.to_vec())
 		}
 	};
 
-	Ok((samples, rate))
+	Ok((merge_channels(&samples, channels), rate))
 }
 
 #[allow(unused)]
