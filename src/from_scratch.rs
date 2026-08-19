@@ -307,8 +307,8 @@ fn write_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
 	// Starting RIFF tag
 	writer.write_all(&RIFF_ID)?;
 
-	// TODO: Total file size
-	writer.write_all(&[0, 0, 0, 0])?;
+	// Total file size: 56 + data size
+	write_u32(writer, (56 + data.data_buffer.len()) as u32)?;
 
 	// WAVE tag
 	writer.write_all(&WAVE_ID)?;
