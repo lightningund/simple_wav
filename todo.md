@@ -3,4 +3,6 @@
 -[ ] Support i24
 -[X] Support writing EXT format
 -[ ] Support multi-channel
--[ ] STOP UNWRAPPING EVERYTHING
+	-[X] Reading
+	-[ ] Writing
+-[X] STOP UNWRAPPING EVERYTHING

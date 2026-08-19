@@ -123,6 +123,7 @@ mod conversion {
 const RIFF_ID: [u8; 4] = *b"RIFF";
 const WAVE_ID: [u8; 4] = *b"WAVE";
 const FMT_ID: [u8; 4] = *b"fmt ";
+const FACT_ID: [u8; 4] = *b"fact";
 const DATA_ID: [u8; 4] = *b"data";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,7 +256,7 @@ fn write_u32(writer: &mut Box<dyn Write>, val: u32) -> ioResult<()> {
 	writer.write_all(&val.to_le_bytes())
 }
 
-fn write_ext_fmt_chunk(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
+fn write_ext_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
 	const GUID_ENDING: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
 
 	let (wave_format, sample_bits) = match data.sample_type {
@@ -264,6 +265,14 @@ fn write_ext_fmt_chunk(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<(
 		SampleType::F32 => (WaveFormat::IEEE_FLOAT, 32),
 		SampleType::F64 => (WaveFormat::IEEE_FLOAT, 64),
 	};
+
+	let sample_bytes = (sample_bits as u32) / 8;
+
+	// Total file size: 60 + data size
+	write_u32(writer, (60 + data.data_buffer.len()) as u32)?;
+
+	// WAVE tag
+	writer.write_all(&WAVE_ID)?;
 
 	// Format ID Tag
 	writer.write_all(&FMT_ID)?;
@@ -276,9 +285,9 @@ fn write_ext_fmt_chunk(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<(
 	// Next 4: Sample Rate
 	write_u32(writer, data.sample_rate)?;
 	// Next 4: Bytes/Sec
-	write_u32(writer, data.sample_rate * (sample_bits as u32) / 16)?;
+	write_u32(writer, data.sample_rate * sample_bytes)?;
 	// Next 2: Block align
-	write_u16(writer, data.channels * sample_bits / 16)?;
+	write_u16(writer, data.channels * (sample_bytes as u16))?;
 	// Next 2: Sample size in bits
 	write_u16(writer, sample_bits)?;
 	// Next 2: Extension Size
@@ -292,13 +301,21 @@ fn write_ext_fmt_chunk(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<(
 	// Next 14: Fixed GUID string
 	writer.write_all(&GUID_ENDING)?;
 
-	Ok(())
-}
+	// fact chunk
+	// Fact ID Tag
+	writer.write_all(&FACT_ID)?;
+	// Next 4: Chunk size
+	write_u32(writer, 4)?;
+	// Next 4: # Samples
+	write_u32(writer, (data.data_buffer.len() as u32) / sample_bytes)?;
 
-fn write_data_chunk(writer: &mut Box<dyn Write>, data_buffer: &Vec<u8>) -> ioResult<()> {
+	// data chunk
+	// Data ID Tag
 	writer.write_all(&DATA_ID)?;
-	write_u32(writer, data_buffer.len() as u32)?;
-	writer.write_all(data_buffer)?;
+	// Next 4: Data length
+	write_u32(writer, data.data_buffer.len() as u32)?;
+	// Next N: Actual Data
+	writer.write_all(&data.data_buffer)?;
 
 	Ok(())
 }
@@ -307,16 +324,7 @@ fn write_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
 	// Starting RIFF tag
 	writer.write_all(&RIFF_ID)?;
 
-	// Total file size: 56 + data size
-	write_u32(writer, (56 + data.data_buffer.len()) as u32)?;
-
-	// WAVE tag
-	writer.write_all(&WAVE_ID)?;
-
-	// Format Chunk
-	write_ext_fmt_chunk(writer, data)?;
-
-	write_data_chunk(writer, &data.data_buffer)?;
+	write_ext_chunks(writer, data)?;
 
 	Ok(())
 }

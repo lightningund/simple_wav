@@ -1046,7 +1046,7 @@ mod test {
 
 	#[test]
 	fn simple() {
-		let (samples, rate) = from_scratch::read::<i16, _>("./audio/Test A.wav").unwrap();
+		let (samples, rate) = from_scratch::read::<f64, _>("./audio/Test A.wav").unwrap();
 		from_scratch::write(samples, rate, "./audio/Test A Simple Out.wav").unwrap();
 	}
 }
