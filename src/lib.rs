@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 use std::path::Path;
+use std::error::Error;
 
 use std::io::Result as ioResult;
 
@@ -184,18 +185,36 @@ struct MinWav {
 	data_buffer: Vec<u8>, // Raw buffer of the samples
 }
 
-// TODO: Make this not panic lol
-fn determine_sample_type(wave_format: u16, sample_size: u16) -> SampleType {
+#[derive(Debug)]
+enum SampleTypeError {
+	InvalidPCMWidth(u16),
+	InvalidFloatWidth(u16),
+	UnsupportedFormat(u16),
+}
+
+impl std::fmt::Display for SampleTypeError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			SampleTypeError::InvalidPCMWidth(width) => write!(f, "Invalid PCM sample width {}", width),
+			SampleTypeError::InvalidFloatWidth(width) => write!(f, "Invalid IEEE Float sample width {}", width),
+			SampleTypeError::UnsupportedFormat(format) => write!(f, "Unsupported Format {}", format),
+		}
+	}
+}
+
+impl Error for SampleTypeError {}
+
+fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleType, SampleTypeError> {
 	if wave_format == WaveFormat::PCM as u16 {
-		if sample_size == 16 { SampleType::I16 }
-		else if sample_size == 32 { SampleType::I32 }
-		else { panic!("Invalid PCM sample width {}", sample_size) }
+		if sample_size == 16 { Ok(SampleType::I16) }
+		else if sample_size == 32 { Ok(SampleType::I32) }
+		else { Err(SampleTypeError::InvalidPCMWidth(sample_size)) }
 	} else if wave_format == WaveFormat::IEEE_FLOAT as u16 {
-		if sample_size == 32 { SampleType::F32 }
-		else if sample_size == 64 { SampleType::F64 }
-		else { panic!("Invalid IEEE Float sample width {}", sample_size) }
+		if sample_size == 32 { Ok(SampleType::F32) }
+		else if sample_size == 64 { Ok(SampleType::F64) }
+		else { Err(SampleTypeError::InvalidFloatWidth(sample_size)) }
 	} else {
-		panic!("Unsupported Format {}", wave_format)
+		Err(SampleTypeError::UnsupportedFormat(wave_format))
 	}
 }
 
@@ -226,7 +245,8 @@ fn read_fmt_chunk(reader: &mut Box<dyn ReadSeek>) -> ioResult<WavFormat> {
 	}
 
 	println!("{chunk_size}, {sample_rate}, {channels}, {wave_format}, {sample_size}");
-	let sample_type = determine_sample_type(wave_format, sample_size);
+	// TODO: Make this not panic lol
+	let sample_type = determine_sample_type(wave_format, sample_size).unwrap();
 
 	println!("{:?}", sample_type);
 
