@@ -10,8 +10,14 @@ use bytemuck::cast_slice;
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SampleType { I16, I32, F32, F64 }
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SampleType {
+	#[default]
+	I16,
+	I32,
+	F32,
+	F64
+}
 
 /// Module containing the functionality for converting between the supported audio sample types
 mod conversion {
@@ -163,12 +169,68 @@ fn read_u32(reader: &mut Box<dyn ReadSeek>) -> ioResult<u32> {
 	Ok(u32::from_le_bytes(buf))
 }
 
-/// Just the absolute minimum of important information in a wav file
-struct MinWav {
-	data_buffer: Vec<u8>, // Raw buffer of the samples
-	sample_type: SampleType, // The sample type
-	sample_rate: u32, // The sample rate
+/// Important information we get out of the format chunk
+#[derive(Default, Debug, Clone, Copy)]
+struct WavFormat {
 	channels: u16, // The number of channels
+	sample_rate: u32, // The sample rate
+	sample_type: SampleType, // The sample type
+}
+
+/// Just the absolute minimum of important information in a wav file
+#[derive(Debug, Clone)]
+struct MinWav {
+	format: WavFormat, // Information about the structure of the audio
+	data_buffer: Vec<u8>, // Raw buffer of the samples
+}
+
+// TODO: Make this not panic lol
+fn determine_sample_type(wave_format: u16, sample_size: u16) -> SampleType {
+	if wave_format == WaveFormat::PCM as u16 {
+		if sample_size == 16 { SampleType::I16 }
+		else if sample_size == 32 { SampleType::I32 }
+		else { panic!("Invalid PCM sample width {}", sample_size) }
+	} else if wave_format == WaveFormat::IEEE_FLOAT as u16 {
+		if sample_size == 32 { SampleType::F32 }
+		else if sample_size == 64 { SampleType::F64 }
+		else { panic!("Invalid IEEE Float sample width {}", sample_size) }
+	} else {
+		panic!("Unsupported Format {}", wave_format)
+	}
+}
+
+fn read_fmt_chunk(reader: &mut Box<dyn ReadSeek>) -> ioResult<WavFormat> {
+	// First 4: Size of this chunk
+	let chunk_size = read_u32(reader)?;
+	// Next 2: WaveFormat
+	let mut wave_format = read_u16(reader)?;
+	// Next 2: # Channels
+	let channels = read_u16(reader)?;
+	// Next 4: Sample Rate
+	let sample_rate = read_u32(reader)?;
+	// Skip 6: Bytes/Sec (4), Block align (2)
+	reader.seek_relative(6)?;
+	// Next 2: Sample size in bits
+	let sample_size = read_u16(reader)?;
+	if chunk_size > 16 {
+		// Skip 2: Extension Size (2)
+		reader.seek_relative(2)?;
+		if chunk_size > 18 {
+			// Skip 6: Sample size in bits (2), Speaker positions (4), GUID (16)
+			reader.seek_relative(6)?;
+			// Next 2: Subformat
+			wave_format = read_u16(reader)?;
+			// Skip 14: Fixed string of the GUID for some reason
+			reader.seek_relative(14)?;
+		}
+	}
+
+	println!("{chunk_size}, {sample_rate}, {channels}, {wave_format}, {sample_size}");
+	let sample_type = determine_sample_type(wave_format, sample_size);
+
+	println!("{:?}", sample_type);
+
+	Ok(WavFormat { channels, sample_rate, sample_type })
 }
 
 fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
@@ -181,10 +243,7 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	// Then needs say WAVE
 	confirm_bytes(reader, WAVE_ID);
 
-	// Meaningless defaults for compiler reasons
-	let mut channels = 0;
-	let mut sample_rate = 0;
-	let mut sample_type = SampleType::I16;
+	let mut format: WavFormat = Default::default();
 	let mut data_buffer = vec![];
 
 	let mut fmt_read = false;
@@ -194,46 +253,7 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	while !data_read && reader.read_exact(&mut id_buf).is_ok() {
 		if id_buf == FMT_ID {
 			fmt_read = true;
-			// First 4: Size of this chunk
-			let chunk_size = read_u32(reader)?;
-			// Next 2: WaveFormat
-			let mut wave_format = read_u16(reader)?;
-			// Next 2: # Channels
-			channels = read_u16(reader)?;
-			// Next 4: Sample Rate
-			sample_rate = read_u32(reader)?;
-			// Skip 6: Bytes/Sec (4), Block align (2)
-			reader.seek_relative(6)?;
-			// Next 2: Sample size in bits
-			let sample_size = read_u16(reader)?;
-			if chunk_size > 16 {
-				// Skip 2: Extension Size (2)
-				reader.seek_relative(2)?;
-				if chunk_size > 18 {
-					// Skip 6: Sample size in bits (2), Speaker positions (4), GUID (16)
-					reader.seek_relative(6)?;
-					// Next 2: Subformat
-					wave_format = read_u16(reader)?;
-					// Skip 14: Fixed string of the GUID for some reason
-					reader.seek_relative(14)?;
-				}
-			}
-
-			println!("{chunk_size}, {sample_rate}, {channels}, {wave_format}, {sample_size}");
-			sample_type =
-				if wave_format == WaveFormat::PCM as u16 {
-					if sample_size == 16 { SampleType::I16 }
-					else if sample_size == 32 { SampleType::I32 }
-					else { panic!("Invalid PCM sample width {}", sample_size) }
-				} else if wave_format == WaveFormat::IEEE_FLOAT as u16 {
-					if sample_size == 32 { SampleType::F32 }
-					else if sample_size == 64 { SampleType::F64 }
-					else { panic!("Invalid IEEE Float sample width {}", sample_size) }
-				} else {
-					panic!("Unsupported Format {}", wave_format)
-				};
-
-			println!("{:?}", sample_type);
+			format = read_fmt_chunk(reader)?;
 		} else if id_buf == DATA_ID {
 			data_read = true;
 			// First 4: length of the data buffer in bytes
@@ -246,7 +266,7 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	if !fmt_read { panic!("File didn't have a format chunk!") }
 	if !data_read { panic!("File didn't have a data chunk!") }
 
-	Ok(MinWav{ data_buffer, sample_type, sample_rate, channels })
+	Ok(MinWav { data_buffer, format })
 }
 
 fn write_u16(writer: &mut Box<dyn Write>, val: u16) -> ioResult<()> {
@@ -257,10 +277,11 @@ fn write_u32(writer: &mut Box<dyn Write>, val: u32) -> ioResult<()> {
 	writer.write_all(&val.to_le_bytes())
 }
 
-fn write_ext_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
+/// Writes all the required chunks in the extensible format
+fn write_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
 	const GUID_ENDING: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
 
-	let (wave_format, sample_bits) = match data.sample_type {
+	let (wave_format, sample_bits) = match data.format.sample_type {
 		SampleType::I16 => (WaveFormat::PCM, 16),
 		SampleType::I32 => (WaveFormat::PCM, 32),
 		SampleType::F32 => (WaveFormat::IEEE_FLOAT, 32),
@@ -269,7 +290,10 @@ fn write_ext_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> 
 
 	let sample_bytes = (sample_bits as u32) / 8;
 
-	// Total file size: 60 + data size
+	// Starting RIFF tag
+	writer.write_all(&RIFF_ID)?;
+
+	// Next 4: Total file size: 60 + data size
 	write_u32(writer, (60 + data.data_buffer.len()) as u32)?;
 
 	// WAVE tag
@@ -282,13 +306,13 @@ fn write_ext_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> 
 	// Next 2: WaveFormat
 	write_u16(writer, WaveFormat::EXTENSIBLE as u16)?;
 	// Next 2: # Channels
-	write_u16(writer, data.channels)?;
+	write_u16(writer, data.format.channels)?;
 	// Next 4: Sample Rate
-	write_u32(writer, data.sample_rate)?;
+	write_u32(writer, data.format.sample_rate)?;
 	// Next 4: Bytes/Sec
-	write_u32(writer, data.sample_rate * sample_bytes)?;
+	write_u32(writer, data.format.sample_rate * sample_bytes)?;
 	// Next 2: Block align
-	write_u16(writer, data.channels * (sample_bytes as u16))?;
+	write_u16(writer, data.format.channels * (sample_bytes as u16))?;
 	// Next 2: Sample size in bits
 	write_u16(writer, sample_bits)?;
 	// Next 2: Extension Size
@@ -321,24 +345,10 @@ fn write_ext_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> 
 	Ok(())
 }
 
-fn write_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
-	// Starting RIFF tag
-	writer.write_all(&RIFF_ID)?;
-
-	write_ext_chunks(writer, data)?;
-
-	Ok(())
-}
-
 use conversion::ConvertTo;
 
 /// Trait to mark a type as one of the available for being read/written in wav files
-pub trait AudioSample:
-	bytemuck::Pod + Default +
-	ConvertTo<i16> + ConvertTo<i32> + ConvertTo<f32> + ConvertTo<f64>
-{
-	const WAV_TYPE: SampleType;
-}
+pub trait AudioSample: bytemuck::Pod { const WAV_TYPE: SampleType; }
 impl AudioSample for i16 { const WAV_TYPE: SampleType = SampleType::I16; }
 impl AudioSample for i32 { const WAV_TYPE: SampleType = SampleType::I32; }
 impl AudioSample for f32 { const WAV_TYPE: SampleType = SampleType::F32; }
@@ -349,8 +359,6 @@ where f64: ConvertTo<T> {
 	let mut arr: Vec<T> = vec![Default::default(); samples.len() / channels];
 	// Convert everything to mono by averaging
 	for (idx, raw) in samples.chunks_exact(channels).enumerate() {
-		// Use f64 as an intermediate because it will work with float and int targets
-		// We do technically lose a little bit of precision theoretically, but I don't think it will matter
 		let mut total: f64 = 0.0;
 		for channel_sample in raw {
 			total += channel_sample.convert_to();
@@ -377,7 +385,7 @@ where
 {
 	let f = std::fs::File::open(path)?;
 	let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
-	let MinWav { data_buffer, sample_type, sample_rate, channels } = read_chunks(&mut reader)?;
+	let MinWav { data_buffer, format: WavFormat { sample_type, sample_rate, channels } } = read_chunks(&mut reader)?;
 
 	let channels = channels as usize;
 	let rate = sample_rate as usize;
@@ -412,15 +420,17 @@ where
 }
 
 #[allow(unused)]
-pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) -> ioResult<()>{
+pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) -> ioResult<()> {
 	let rate = rate as u32;
 
 	let casted_samples = cast_slice::<S, u8>(&samples[..]);
 	let wav_data = MinWav {
 		data_buffer: casted_samples.to_vec(),
-		sample_type: S::WAV_TYPE,
-		sample_rate: rate,
-		channels: 1
+		format: WavFormat {
+			sample_type: S::WAV_TYPE,
+			sample_rate: rate,
+			channels: 1
+		}
 	};
 
 	let f = File::create(&path)?;
