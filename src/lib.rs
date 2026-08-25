@@ -18,6 +18,25 @@ pub enum SampleType {
 	F64
 }
 
+#[derive(Debug)]
+enum SampleTypeError {
+	InvalidPCMWidth(u16),
+	InvalidFloatWidth(u16),
+	UnsupportedFormat(u16),
+}
+
+impl std::fmt::Display for SampleTypeError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			SampleTypeError::InvalidPCMWidth(width) => write!(f, "Invalid PCM sample width {}", width),
+			SampleTypeError::InvalidFloatWidth(width) => write!(f, "Invalid IEEE Float sample width {}", width),
+			SampleTypeError::UnsupportedFormat(format) => write!(f, "Unsupported Format {}", format),
+		}
+	}
+}
+
+impl Error for SampleTypeError {}
+
 /// Module containing the functionality for converting between the supported audio sample types
 mod conversion {
 	/// Trait for converting between audio sample types
@@ -183,25 +202,6 @@ struct MinWav {
 	data_buffer: Vec<u8>, // Raw buffer of the samples
 }
 
-#[derive(Debug)]
-enum SampleTypeError {
-	InvalidPCMWidth(u16),
-	InvalidFloatWidth(u16),
-	UnsupportedFormat(u16),
-}
-
-impl std::fmt::Display for SampleTypeError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			SampleTypeError::InvalidPCMWidth(width) => write!(f, "Invalid PCM sample width {}", width),
-			SampleTypeError::InvalidFloatWidth(width) => write!(f, "Invalid IEEE Float sample width {}", width),
-			SampleTypeError::UnsupportedFormat(format) => write!(f, "Unsupported Format {}", format),
-		}
-	}
-}
-
-impl Error for SampleTypeError {}
-
 /// Get the entry in the enum based on the format and number of bits per sample
 fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleType, SampleTypeError> {
 	if wave_format == WaveFormat::PCM as u16 {
@@ -257,6 +257,11 @@ fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> ioResult<WavFormat> {
 	Ok(WavFormat { channels, sample_rate, sample_type })
 }
 
+/// Read in all the chunks of a wav file
+///
+/// # Panics
+/// Panics if the file is malformed
+// TODO: Make this return a proper error instead of panicking
 fn read_chunks<R: ReadSeek>(reader: &mut R) -> ioResult<MinWav> {
 	// First 4 bytes need to be RIFF
 	confirm_bytes(reader, RIFF_ID);
