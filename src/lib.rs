@@ -1,8 +1,7 @@
 use std::io::{Read, Seek, Write};
-use std::error::Error;
-
 use std::io::Result as ioResult;
 
+use thiserror::Error;
 use bytemuck::cast_slice;
 
 /// Trait representing a type that can be used to read and seek.
@@ -18,61 +17,31 @@ pub enum SampleType {
 	F64
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Error, Debug)]
 pub enum SampleTypeError {
+	#[error("Invalid PCM sample width {0}")]
 	InvalidPCMWidth(u16),
+	#[error("Invalid IEEE Float sample width {0}")]
 	InvalidFloatWidth(u16),
+	#[error("Unsupported Format {0}")]
 	UnsupportedFormat(u16),
 }
 
-impl std::fmt::Display for SampleTypeError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			SampleTypeError::InvalidPCMWidth(width) => write!(f, "Invalid PCM sample width {}", width),
-			SampleTypeError::InvalidFloatWidth(width) => write!(f, "Invalid IEEE Float sample width {}", width),
-			SampleTypeError::UnsupportedFormat(format) => write!(f, "Unsupported Format {}", format),
-		}
-	}
-}
-
-impl Error for SampleTypeError {}
-
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WavError {
-	IOError(std::io::Error),
-	SampleTypeError(SampleTypeError),
+	#[error("{0}")]
+	IOError(#[from] std::io::Error),
+	#[error("{0}")]
+	SampleTypeError(#[from] SampleTypeError),
+	#[error("File is missing the fmt chunk")]
 	MissingFMT,
+	#[error("File is missing the data chunk")]
 	MissingData,
+	#[error("File is missing the beginning RIFF tag")]
 	RIFFInvalid,
+	#[error("File is missing the beginning WAVE tag")]
 	WAVEInvalid,
 }
-
-impl std::fmt::Display for WavError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			WavError::IOError(err) => write!(f, "{}", err),
-			WavError::SampleTypeError(err) => write!(f, "{}", err),
-			WavError::MissingFMT => write!(f, "File is missing the fmt chunk"),
-			WavError::MissingData => write!(f, "File is missing the data chunk"),
-			WavError::RIFFInvalid => write!(f, "File is missing the beginning RIFF tag"),
-			WavError::WAVEInvalid => write!(f, "File is missing the beginning WAVE tag"),
-		}
-	}
-}
-
-impl From<SampleTypeError> for WavError {
-	fn from(value: SampleTypeError) -> Self {
-		WavError::SampleTypeError(value)
-	}
-}
-
-impl From<std::io::Error> for WavError {
-	fn from(value: std::io::Error) -> Self {
-		WavError::IOError(value)
-	}
-}
-
-impl Error for WavError {}
 
 type WavResult<T> = Result<T, WavError>;
 
