@@ -399,6 +399,16 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 }
 
 /// Returns a tuple of the samples and the rate
+///
+/// ```rust
+/// # use simple_wav::read;
+/// # fn func() -> Result<(), Box<dyn std::error::Error>> {
+/// let in_file = std::fs::File::open("/path/to/file.wav")?;
+/// let reader = std::io::BufReader::new(in_file);
+///	let (samples, rate) = read::<i16, _>(reader)?;
+/// # Ok(())
+/// # }
+/// ```
 #[allow(unused)]
 pub fn read<S, R: ReadSeek>(mut reader: R) -> ioResult<(Vec<S>, usize)>
 where
@@ -465,25 +475,38 @@ mod test {
     use super::*;
 	use std::fs::File;
 	use std::io::{BufReader, BufWriter};
+	use std::path::Path;
+
+	fn read_file<S, P: AsRef<Path>>(path: P) -> (Vec<S>, usize)
+	where
+		i16: ConvertTo<S>,
+		i32: ConvertTo<S>,
+		f32: ConvertTo<S>,
+		f64: ConvertTo<S>
+	{
+		let in_file = std::fs::File::open(path).unwrap();
+		let reader = BufReader::new(&in_file);
+		read::<S, _>(reader).unwrap()
+	}
+
+	fn write_file<S: AudioSample, P: AsRef<Path>>(path: P, samples: Vec<S>, rate: usize) {
+		let f = File::create(path).unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
+	}
 
 	#[test]
 	fn saveload() {
-		let in_file = std::fs::File::open("./audio/Test A.wav").unwrap();
-		let (samples, rate) = read::<i16, _>(BufReader::new(&in_file)).unwrap();
-		let f = File::create("./audio/Test A Out I16.wav").unwrap();
-		write(BufWriter::new(f), samples, rate).unwrap();
+		let (samples, rate) = read_file::<i16, _>("./audio/Test A.wav");
+		write_file("./audio/Test A Out I16.wav", samples, rate);
 
-		let (samples, rate) = read::<i32, _>(BufReader::new(&in_file)).unwrap();
-		let f = File::create("./audio/Test A Out I32.wav").unwrap();
-		write(BufWriter::new(f), samples, rate).unwrap();
+		let (samples, rate) = read_file::<i32, _>("./audio/Test A.wav");
+		write_file("./audio/Test A Out I32.wav", samples, rate);
 
-		let (samples, rate) = read::<f32, _>(BufReader::new(&in_file)).unwrap();
-		let f = File::create("./audio/Test A Out F32.wav").unwrap();
-		write(BufWriter::new(f), samples, rate).unwrap();
+		let (samples, rate) = read_file::<f32, _>("./audio/Test A.wav");
+		write_file("./audio/Test A Out F32.wav", samples, rate);
 
-		let (samples, rate) = read::<f64, _>(BufReader::new(&in_file)).unwrap();
-		let f = File::create("./audio/Test A Out F64.wav").unwrap();
-		write(BufWriter::new(f), samples, rate).unwrap();
+		let (samples, rate) = read_file::<f64, _>("./audio/Test A.wav");
+		write_file("./audio/Test A Out F64.wav", samples, rate);
 	}
 
 	// Test saturating casting
