@@ -1,6 +1,4 @@
-use std::fs::File;
-use std::io::{BufWriter, Read, Seek, Write};
-use std::path::Path;
+use std::io::{Read, Seek, Write};
 use std::error::Error;
 
 use std::io::Result as ioResult;
@@ -8,7 +6,7 @@ use std::io::Result as ioResult;
 use bytemuck::cast_slice;
 
 /// Trait representing a type that can be used to read and seek.
-trait ReadSeek: Read + Seek {}
+pub trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -149,7 +147,7 @@ enum WaveFormat {
 /// Uses assert for the comparison
 ///
 /// Advances the reader forward by N
-fn confirm_bytes<const N: usize>(reader: &mut Box<dyn ReadSeek>, target: [u8; N]) {
+fn confirm_bytes<R: ReadSeek, const N: usize>(reader: &mut R, target: [u8; N]) {
 	let mut buf = [0; N];
 	// we unwrap here because if anything goes wrong we're gonna panic at the assert anyway
 	reader.read_exact(&mut buf).unwrap();
@@ -157,14 +155,14 @@ fn confirm_bytes<const N: usize>(reader: &mut Box<dyn ReadSeek>, target: [u8; N]
 }
 
 /// Reads two bytes and converts them to a u16, assuming little endian
-fn read_u16(reader: &mut Box<dyn ReadSeek>) -> ioResult<u16> {
+fn read_u16<R: ReadSeek>(reader: &mut R) -> ioResult<u16> {
 	let mut buf = [0; 2];
 	reader.read_exact(&mut buf)?;
 	Ok(u16::from_le_bytes(buf))
 }
 
 /// Reads four bytes and converts them to a u32, assuming little endian
-fn read_u32(reader: &mut Box<dyn ReadSeek>) -> ioResult<u32> {
+fn read_u32<R: ReadSeek>(reader: &mut R) -> ioResult<u32> {
 	let mut buf = [0; 4];
 	reader.read_exact(&mut buf)?;
 	Ok(u32::from_le_bytes(buf))
@@ -224,7 +222,7 @@ fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleTyp
 /// Supports 16, 18, and 40 byte headers
 ///
 /// Note: Expects the `fmt ` bytes to have already been read
-fn read_fmt_chunk(reader: &mut Box<dyn ReadSeek>) -> ioResult<WavFormat> {
+fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> ioResult<WavFormat> {
 	// First 4: Size of this chunk
 	let chunk_size = read_u32(reader)?;
 	// Next 2: WaveFormat
@@ -259,7 +257,7 @@ fn read_fmt_chunk(reader: &mut Box<dyn ReadSeek>) -> ioResult<WavFormat> {
 	Ok(WavFormat { channels, sample_rate, sample_type })
 }
 
-fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
+fn read_chunks<R: ReadSeek>(reader: &mut R) -> ioResult<MinWav> {
 	// First 4 bytes need to be RIFF
 	confirm_bytes(reader, RIFF_ID);
 
@@ -402,15 +400,13 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 
 /// Returns a tuple of the samples and the rate
 #[allow(unused)]
-pub fn read<S, P: AsRef<Path>>(path: P) -> ioResult<(Vec<S>, usize)>
+pub fn read<S, R: ReadSeek>(mut reader: R) -> ioResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
 	i32: ConvertTo<S>,
 	f32: ConvertTo<S>,
 	f64: ConvertTo<S>,
 {
-	let f = std::fs::File::open(path)?;
-	let mut reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
 	let MinWav { data_buffer, format: WavFormat { sample_type, sample_rate, channels } } = read_chunks(&mut reader)?;
 
 	let channels = channels as usize;
@@ -459,12 +455,7 @@ pub fn write<S: AudioSample, W: Write>(mut writer: W, samples: Vec<S>, rate: usi
 		}
 	};
 
-	// let f = File::create(&path)?;
-	// let mut writer: Box<dyn Write> = Box::new(BufWriter::new(f));
-
 	write_chunks(&mut writer, &wav_data)?;
-
-	// println!("Finished writing to file: {:?}", path.as_ref());
 
 	Ok(())
 }
@@ -472,22 +463,25 @@ pub fn write<S: AudioSample, W: Write>(mut writer: W, samples: Vec<S>, rate: usi
 #[cfg(test)]
 mod test {
     use super::*;
+	use std::fs::File;
+	use std::io::{BufReader, BufWriter};
 
 	#[test]
 	fn saveload() {
-		let (samples, rate) = read::<i16, _>("./audio/Test A.wav").unwrap();
+		let in_file = std::fs::File::open("./audio/Test A.wav").unwrap();
+		let (samples, rate) = read::<i16, _>(BufReader::new(&in_file)).unwrap();
 		let f = File::create("./audio/Test A Out I16.wav").unwrap();
 		write(BufWriter::new(f), samples, rate).unwrap();
 
-		let (samples, rate) = read::<i32, _>("./audio/Test A.wav").unwrap();
+		let (samples, rate) = read::<i32, _>(BufReader::new(&in_file)).unwrap();
 		let f = File::create("./audio/Test A Out I32.wav").unwrap();
 		write(BufWriter::new(f), samples, rate).unwrap();
 
-		let (samples, rate) = read::<f32, _>("./audio/Test A.wav").unwrap();
+		let (samples, rate) = read::<f32, _>(BufReader::new(&in_file)).unwrap();
 		let f = File::create("./audio/Test A Out F32.wav").unwrap();
 		write(BufWriter::new(f), samples, rate).unwrap();
 
-		let (samples, rate) = read::<f64, _>("./audio/Test A.wav").unwrap();
+		let (samples, rate) = read::<f64, _>(BufReader::new(&in_file)).unwrap();
 		let f = File::create("./audio/Test A Out F64.wav").unwrap();
 		write(BufWriter::new(f), samples, rate).unwrap();
 	}
@@ -505,7 +499,8 @@ mod test {
 
 	#[test]
 	fn simple() {
-		let (samples, rate) = read::<f64, _>("./audio/Test A.wav").unwrap();
+		let in_file = std::fs::File::open("./audio/Test A.wav").unwrap();
+		let (samples, rate) = read::<f64, _>(BufReader::new(&in_file)).unwrap();
 		let f = File::create("./audio/Test A Simple Out.wav").unwrap();
 		write(BufWriter::new(f), samples, rate).unwrap();
 	}
