@@ -11,7 +11,7 @@ use bytemuck::cast_slice;
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SampleType {
 	#[default]
 	I16,
@@ -204,6 +204,7 @@ impl std::fmt::Display for SampleTypeError {
 
 impl Error for SampleTypeError {}
 
+/// Get the entry in the enum based on the format and number of bits per sample
 fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleType, SampleTypeError> {
 	if wave_format == WaveFormat::PCM as u16 {
 		if sample_size == 16 { Ok(SampleType::I16) }
@@ -218,6 +219,11 @@ fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleTyp
 	}
 }
 
+/// Read in the fmt chunk and return the important data
+///
+/// Supports 16, 18, and 40 byte headers
+///
+/// Note: Expects the `fmt ` bytes to have already been read
 fn read_fmt_chunk(reader: &mut Box<dyn ReadSeek>) -> ioResult<WavFormat> {
 	// First 4: Size of this chunk
 	let chunk_size = read_u32(reader)?;
@@ -289,16 +295,16 @@ fn read_chunks(reader: &mut Box<dyn ReadSeek>) -> ioResult<MinWav> {
 	Ok(MinWav { data_buffer, format })
 }
 
-fn write_u16(writer: &mut Box<dyn Write>, val: u16) -> ioResult<()> {
+fn write_u16<W: Write>(writer: &mut W, val: u16) -> ioResult<()> {
 	writer.write_all(&val.to_le_bytes())
 }
 
-fn write_u32(writer: &mut Box<dyn Write>, val: u32) -> ioResult<()> {
+fn write_u32<W: Write>(writer: &mut W, val: u32) -> ioResult<()> {
 	writer.write_all(&val.to_le_bytes())
 }
 
 /// Writes all the required chunks in the extensible format
-fn write_chunks(writer: &mut Box<dyn Write>, data: &MinWav) -> ioResult<()> {
+fn write_chunks<W: Write>(writer: &mut W, data: &MinWav) -> ioResult<()> {
 	const GUID_ENDING: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
 
 	let (wave_format, sample_bits) = match data.format.sample_type {
@@ -440,7 +446,7 @@ where
 }
 
 #[allow(unused)]
-pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path: P) -> ioResult<()> {
+pub fn write<S: AudioSample, W: Write>(mut writer: W, samples: Vec<S>, rate: usize) -> ioResult<()> {
 	let rate = rate as u32;
 
 	let casted_samples = cast_slice::<S, u8>(&samples[..]);
@@ -453,12 +459,12 @@ pub fn write<S: AudioSample, P: AsRef<Path>>(samples: Vec<S>, rate: usize, path:
 		}
 	};
 
-	let f = File::create(&path)?;
-	let mut writer: Box<dyn Write> = Box::new(BufWriter::new(f));
+	// let f = File::create(&path)?;
+	// let mut writer: Box<dyn Write> = Box::new(BufWriter::new(f));
 
 	write_chunks(&mut writer, &wav_data)?;
 
-	println!("Finished writing to file: {:?}", path.as_ref());
+	// println!("Finished writing to file: {:?}", path.as_ref());
 
 	Ok(())
 }
@@ -470,13 +476,20 @@ mod test {
 	#[test]
 	fn saveload() {
 		let (samples, rate) = read::<i16, _>("./audio/Test A.wav").unwrap();
-		write(samples, rate, "./audio/Test A Out I16.wav").unwrap();
+		let f = File::create("./audio/Test A Out I16.wav").unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
+
 		let (samples, rate) = read::<i32, _>("./audio/Test A.wav").unwrap();
-		write(samples, rate, "./audio/Test A Out I32.wav").unwrap();
+		let f = File::create("./audio/Test A Out I32.wav").unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
+
 		let (samples, rate) = read::<f32, _>("./audio/Test A.wav").unwrap();
-		write(samples, rate, "./audio/Test A Out F32.wav").unwrap();
+		let f = File::create("./audio/Test A Out F32.wav").unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
+
 		let (samples, rate) = read::<f64, _>("./audio/Test A.wav").unwrap();
-		write(samples, rate, "./audio/Test A Out F64.wav").unwrap();
+		let f = File::create("./audio/Test A Out F64.wav").unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
 	}
 
 	// Test saturating casting
@@ -493,6 +506,7 @@ mod test {
 	#[test]
 	fn simple() {
 		let (samples, rate) = read::<f64, _>("./audio/Test A.wav").unwrap();
-		write(samples, rate, "./audio/Test A Simple Out.wav").unwrap();
+		let f = File::create("./audio/Test A Simple Out.wav").unwrap();
+		write(BufWriter::new(f), samples, rate).unwrap();
 	}
 }
