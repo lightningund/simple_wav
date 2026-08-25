@@ -18,8 +18,8 @@ pub enum SampleType {
 	F64
 }
 
-#[derive(Debug)]
-enum SampleTypeError {
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum SampleTypeError {
 	InvalidPCMWidth(u16),
 	InvalidFloatWidth(u16),
 	UnsupportedFormat(u16),
@@ -36,6 +36,45 @@ impl std::fmt::Display for SampleTypeError {
 }
 
 impl Error for SampleTypeError {}
+
+#[derive(Debug)]
+pub enum WavError {
+	IOError(std::io::Error),
+	SampleTypeError(SampleTypeError),
+	MissingFMT,
+	MissingData,
+	RIFFInvalid,
+	WAVEInvalid,
+}
+
+impl std::fmt::Display for WavError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			WavError::IOError(err) => write!(f, "{}", err),
+			WavError::SampleTypeError(err) => write!(f, "{}", err),
+			WavError::MissingFMT => write!(f, "File is missing the fmt chunk"),
+			WavError::MissingData => write!(f, "File is missing the data chunk"),
+			WavError::RIFFInvalid => write!(f, "File is missing the beginning RIFF tag"),
+			WavError::WAVEInvalid => write!(f, "File is missing the beginning WAVE tag"),
+		}
+	}
+}
+
+impl From<SampleTypeError> for WavError {
+	fn from(value: SampleTypeError) -> Self {
+		WavError::SampleTypeError(value)
+	}
+}
+
+impl From<std::io::Error> for WavError {
+	fn from(value: std::io::Error) -> Self {
+		WavError::IOError(value)
+	}
+}
+
+impl Error for WavError {}
+
+type WavResult<T> = Result<T, WavError>;
 
 /// Module containing the functionality for converting between the supported audio sample types
 mod conversion {
@@ -163,14 +202,12 @@ enum WaveFormat {
 
 /// Make sure the next however many bytes are the same as the ones passed
 ///
-/// Uses assert for the comparison
-///
 /// Advances the reader forward by N
-fn confirm_bytes<R: ReadSeek, const N: usize>(reader: &mut R, target: [u8; N]) {
+fn confirm_bytes<R: ReadSeek, const N: usize>(reader: &mut R, target: [u8; N]) -> bool {
 	let mut buf = [0; N];
 	// we unwrap here because if anything goes wrong we're gonna panic at the assert anyway
 	reader.read_exact(&mut buf).unwrap();
-	assert_eq!(buf, target);
+	buf == target
 }
 
 /// Reads two bytes and converts them to a u16, assuming little endian
@@ -222,7 +259,7 @@ fn determine_sample_type(wave_format: u16, sample_size: u16) -> Result<SampleTyp
 /// Supports 16, 18, and 40 byte headers
 ///
 /// Note: Expects the `fmt ` bytes to have already been read
-fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> ioResult<WavFormat> {
+fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> WavResult<WavFormat> {
 	// First 4: Size of this chunk
 	let chunk_size = read_u32(reader)?;
 	// Next 2: WaveFormat
@@ -249,8 +286,7 @@ fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> ioResult<WavFormat> {
 	}
 
 	println!("{chunk_size}, {sample_rate}, {channels}, {wave_format}, {sample_size}");
-	// TODO: Make this not panic lol
-	let sample_type = determine_sample_type(wave_format, sample_size).unwrap();
+	let sample_type = determine_sample_type(wave_format, sample_size)?;
 
 	println!("{:?}", sample_type);
 
@@ -258,19 +294,19 @@ fn read_fmt_chunk<R: ReadSeek>(reader: &mut R) -> ioResult<WavFormat> {
 }
 
 /// Read in all the chunks of a wav file
-///
-/// # Panics
-/// Panics if the file is malformed
-// TODO: Make this return a proper error instead of panicking
-fn read_chunks<R: ReadSeek>(reader: &mut R) -> ioResult<MinWav> {
+fn read_chunks<R: ReadSeek>(reader: &mut R) -> WavResult<MinWav> {
 	// First 4 bytes need to be RIFF
-	confirm_bytes(reader, RIFF_ID);
+	if !confirm_bytes(reader, RIFF_ID) {
+		return Err(WavError::RIFFInvalid);
+	}
 
 	// UNUSED: Total file size
 	reader.seek_relative(4)?;
 
 	// Then needs say WAVE
-	confirm_bytes(reader, WAVE_ID);
+	if !confirm_bytes(reader, WAVE_ID) {
+		return Err(WavError::WAVEInvalid);
+	}
 
 	let mut format: WavFormat = Default::default();
 	let mut data_buffer = vec![];
@@ -292,8 +328,8 @@ fn read_chunks<R: ReadSeek>(reader: &mut R) -> ioResult<MinWav> {
 		}
 	}
 
-	if !fmt_read { panic!("File didn't have a format chunk!") }
-	if !data_read { panic!("File didn't have a data chunk!") }
+	if !fmt_read { return Err(WavError::MissingFMT); }
+	if !data_read { return Err(WavError::MissingData); }
 
 	Ok(MinWav { data_buffer, format })
 }
@@ -415,7 +451,7 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 /// # }
 /// ```
 #[allow(unused)]
-pub fn read<S, R: ReadSeek>(mut reader: R) -> ioResult<(Vec<S>, usize)>
+pub fn read<S, R: ReadSeek>(mut reader: R) -> WavResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
 	i32: ConvertTo<S>,
