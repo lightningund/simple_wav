@@ -388,19 +388,16 @@ impl AudioSample for i32 { const WAV_TYPE: SampleType = SampleType::I32; }
 impl AudioSample for f32 { const WAV_TYPE: SampleType = SampleType::F32; }
 impl AudioSample for f64 { const WAV_TYPE: SampleType = SampleType::F64; }
 
+/// Convert everything to mono by averaging
 fn merge_channels<T: Default + Copy + ConvertTo<f64>>(samples: &Vec<T>, channels: usize) -> Vec<T>
 where f64: ConvertTo<T> {
-	let mut arr: Vec<T> = vec![Default::default(); samples.len() / channels];
-	// Convert everything to mono by averaging
-	for (idx, raw) in samples.chunks_exact(channels).enumerate() {
+	samples.chunks_exact(channels).map(|raw| {
 		let mut total: f64 = 0.0;
 		for channel_sample in raw {
 			total += channel_sample.convert_to();
 		}
-
-		arr[idx] = (total / (channels as f64)).convert_to();
-	}
-	arr
+		(total / (channels as f64)).convert_to()
+	}).collect()
 }
 
 /// Convert from one sample type to another
