@@ -403,7 +403,7 @@ where f64: ConvertTo<T> {
 /// Creates an iterator on `samples` of merged together tracks
 ///
 /// Whatever T was going in, it gets converted to f64 and returned that way.
-fn merge_iter<T: ConvertTo<f64>>(samples: &[T], channels: usize) -> impl Iterator {
+fn merge_iter<T: ConvertTo<f64>>(samples: &[T], channels: usize) -> impl Iterator<Item = f64> {
 	samples.chunks_exact(channels).map(move |raw| {
 		raw.iter().fold(0.0, |acc, val| {
 			acc + val.convert_to()
@@ -416,8 +416,9 @@ pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST>
 	samples.iter().map(ConvertTo::<DST>::convert_to).collect()
 }
 
-fn convert_iter<SRC: ConvertTo<DST>, DST>(sample: &SRC) -> DST {
-	sample.convert_to()
+fn convert_iter<I: Iterator, DST>(iter: I) -> impl Iterator<Item = DST>
+where I::Item: ConvertTo<DST> {
+	iter.map(|sample| sample.convert_to())
 }
 
 /// Returns a tuple of the samples and the rate
@@ -450,8 +451,8 @@ where
 	let samples = match sample_type {
 		SampleType::I16 => {
 			let temp = cast_slice::<u8, i16>(&data_buffer[..]);
-			let temp = merge_channels::<i16>(&temp.to_vec(), channels);
-			temp.iter().map(convert_iter).collect()
+			convert_iter(merge_iter(temp, channels)).collect()
+			// let temp = merge_channels::<i16>(&temp.to_vec(), channels);
 			// convert_samples(&temp)
 		}
 		SampleType::I32 => {
