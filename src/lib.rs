@@ -389,17 +389,7 @@ impl AudioSample for f32 { const WAV_TYPE: SampleType = SampleType::F32; }
 impl AudioSample for f64 { const WAV_TYPE: SampleType = SampleType::F64; }
 
 /// Convert everything to mono by averaging
-fn merge_channels<T: Default + Copy + ConvertTo<f64>>(samples: &Vec<T>, channels: usize) -> Vec<T>
-where f64: ConvertTo<T> {
-	samples.chunks_exact(channels).map(|raw| {
-		let mut total: f64 = 0.0;
-		for channel_sample in raw {
-			total += channel_sample.convert_to();
-		}
-		(total / (channels as f64)).convert_to()
-	}).collect()
-}
-
+///
 /// Creates an iterator on `samples` of merged together tracks
 ///
 /// Whatever T was going in, it gets converted to f64 and returned that way.
@@ -412,10 +402,6 @@ fn merge_iter<T: ConvertTo<f64>>(samples: &[T], channels: usize) -> impl Iterato
 }
 
 /// Convert from one sample type to another
-pub fn convert_samples<SRC: ConvertTo<DST>, DST>(samples: &Vec<SRC>) -> Vec<DST> {
-	samples.iter().map(ConvertTo::<DST>::convert_to).collect()
-}
-
 fn convert_iter<I: Iterator, DST>(iter: I) -> impl Iterator<Item = DST>
 where I::Item: ConvertTo<DST> {
 	iter.map(|sample| sample.convert_to())
@@ -432,7 +418,6 @@ where I::Item: ConvertTo<DST> {
 /// # Ok(())
 /// # }
 /// ```
-#[allow(unused)]
 pub fn read<S, R: ReadSeek>(mut reader: R) -> WavResult<(Vec<S>, usize)>
 where
 	i16: ConvertTo<S>,
@@ -470,7 +455,7 @@ where
 	Ok((samples, rate))
 }
 
-#[allow(unused)]
+// TODO: Add doc comments
 pub fn write<S: AudioSample, W: Write>(mut writer: W, samples: Vec<S>, rate: usize) -> ioResult<()> {
 	let rate = rate as u32;
 
