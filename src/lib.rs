@@ -452,23 +452,18 @@ where
 		SampleType::I16 => {
 			let temp = cast_slice::<u8, i16>(&data_buffer[..]);
 			convert_iter(merge_iter(temp, channels)).collect()
-			// let temp = merge_channels::<i16>(&temp.to_vec(), channels);
-			// convert_samples(&temp)
 		}
 		SampleType::I32 => {
 			let temp = cast_slice::<u8, i32>(&data_buffer[..]);
-			let temp = merge_channels::<i32>(&temp.to_vec(), channels);
-			convert_samples(&temp)
+			convert_iter(merge_iter(temp, channels)).collect()
 		}
 		SampleType::F32 => {
 			let temp = cast_slice::<u8, f32>(&data_buffer[..]);
-			let temp = merge_channels::<f32>(&temp.to_vec(), channels);
-			convert_samples(&temp)
+			convert_iter(merge_iter(temp, channels)).collect()
 		}
 		SampleType::F64 => {
 			let temp = cast_slice::<u8, f64>(&data_buffer[..]);
-			let temp = merge_channels::<f64>(&temp.to_vec(), channels);
-			convert_samples(&temp)
+			convert_iter(merge_iter(temp, channels)).collect()
 		}
 	};
 
